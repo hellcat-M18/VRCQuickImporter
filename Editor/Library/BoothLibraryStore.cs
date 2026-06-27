@@ -250,10 +250,45 @@ namespace VRCQuickImporter.Editor.Library
         private static void SaveDocument(BoothLibraryDocument document)
         {
             var json = JsonUtility.ToJson(document, true);
-            var tmpPath = VRCQuickImporterPaths.DatabasePath + ".tmp";
+            var databasePath = VRCQuickImporterPaths.DatabasePath;
+            var tmpPath = databasePath + ".tmp";
+            var backupPath = databasePath + ".bak";
+
             File.WriteAllText(tmpPath, json);
-            File.Copy(tmpPath, VRCQuickImporterPaths.DatabasePath, overwrite: true);
-            try { File.Delete(tmpPath); } catch { }
+
+            try
+            {
+                if (File.Exists(databasePath))
+                {
+                    File.Copy(databasePath, backupPath, overwrite: true);
+                }
+
+                File.Copy(tmpPath, databasePath, overwrite: true);
+            }
+            catch
+            {
+                TryRestoreBackup(databasePath, backupPath);
+                throw;
+            }
+            finally
+            {
+                try { File.Delete(tmpPath); } catch { }
+            }
+        }
+
+        private static void TryRestoreBackup(string databasePath, string backupPath)
+        {
+            try
+            {
+                if (File.Exists(backupPath))
+                {
+                    File.Copy(backupPath, databasePath, overwrite: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] database.json バックアップからの復元に失敗しました: " + ex.Message);
+            }
         }
 
         private static void NormalizeDocument(BoothLibraryDocument document)

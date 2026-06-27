@@ -162,6 +162,18 @@ namespace VRCQuickImporter.Editor.UI
             StylePrimarySyncButton(syncButton);
             headerRow.Add(syncButton);
 
+            if (_librarySyncInProgress)
+            {
+                var cancelButton = new Button(CancelLibrarySync)
+                {
+                    text = "キャンセル",
+                    name = "sync-cancel-button"
+                };
+                cancelButton.tooltip = "進行中の同期を中断します。取得途中のページはローカルJSONキャッシュへ反映しません。";
+                cancelButton.style.marginLeft = VRCQuickImporterTheme.SpaceSm;
+                headerRow.Add(cancelButton);
+            }
+
             var visibleToggle = new Toggle("同期ウインドウを表示")
             {
                 value = _showSyncWindow
@@ -684,6 +696,29 @@ namespace VRCQuickImporter.Editor.UI
             BeginLibrarySync(LibrarySyncMode.FullRefresh);
         }
 
+        private void CancelLibrarySync()
+        {
+            if (!_librarySyncInProgress)
+            {
+                return;
+            }
+
+            try
+            {
+                if (_librarySyncProcess != null && !_librarySyncProcess.HasExited)
+                {
+                    _librarySyncProcess.Kill();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] 同期キャンセル時のhelper終了に失敗しました: " + ex.Message);
+            }
+
+            BoothLibraryStore.DeletePendingPage();
+            FinishLibrarySync(GetSyncModeLabel(_syncMode) + "をキャンセルしました。ローカルJSONキャッシュは変更していません。", keepOverride: true);
+        }
+
         private static bool ConfirmInitialSetup()
         {
             return EditorUtility.DisplayDialog(
@@ -969,7 +1004,19 @@ namespace VRCQuickImporter.Editor.UI
                 return;
             }
 
-            var maxPage = pageHadProducts ? _syncRequestedPage : Math.Max(0, _syncRequestedPage - 1);
+            if (pageHadProducts && _syncRequestedPage >= MaxSmartSyncPages)
+            {
+                FinishLibrarySync(GetSyncModeLabel(_syncMode) + "を安全上限で停止しました。既存のローカルJSONキャッシュは変更していません（取得済み " + _syncCollectedProducts.Count + "件 / ページ" + _syncRequestedPage + "まで）。", keepOverride: true);
+                return;
+            }
+
+            var maxPage = Math.Max(0, _syncRequestedPage - 1);
+            if (_syncMode == LibrarySyncMode.FullRefresh && _syncCollectedProducts.Count == 0 && BoothLibraryStore.HasDatabase)
+            {
+                FinishLibrarySync("完全リフレッシュで商品を取得できなかったため、既存のローカルJSONキャッシュは変更していません。ログイン状態やBOOTH側の表示を確認してください。", keepOverride: true);
+                return;
+            }
+
             var document = BoothLibraryStore.ReplaceDatabaseWithProducts(
                 _syncCollectedProducts,
                 maxPage,
@@ -977,12 +1024,6 @@ namespace VRCQuickImporter.Editor.UI
                 fullRefresh: _syncMode == LibrarySyncMode.FullRefresh);
             _currentMaxPage = document.MaxPage;
             _reachedLastPage = document.ReachedLastPage;
-
-            if (pageHadProducts && _syncRequestedPage >= MaxSmartSyncPages)
-            {
-                FinishLibrarySync(GetSyncModeLabel(_syncMode) + "を安全上限で停止しました（" + document.Products.Count + "件 / ページ" + document.MaxPage + "まで）。", keepOverride: true);
-                return;
-            }
 
             FinishLibrarySync(GetSyncModeLabel(_syncMode) + "が完了しました（" + document.Products.Count + "件 / ページ" + document.MaxPage + "まで）。");
         }
