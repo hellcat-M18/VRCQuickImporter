@@ -81,8 +81,7 @@ namespace VRCQuickImporter.Editor.UI
 
             container.Add(BuildHeader());
             container.Add(BuildLibrarySection());
-            container.Add(BuildLoginSection());
-            container.Add(BuildPathsSection());
+            container.Add(BuildAdvancedSection());
         }
 
         private VisualElement BuildHeader()
@@ -557,12 +556,34 @@ namespace VRCQuickImporter.Editor.UI
             return row;
         }
 
+        private VisualElement BuildAdvancedSection()
+        {
+            var foldout = new Foldout
+            {
+                text = "詳細設定 / トラブルシュート",
+                value = false
+            };
+            foldout.style.marginTop = 18;
+            foldout.tooltip = "ログイン画面、データフォルダ、ログイン用プロファイル削除などの補助機能です。";
+
+            var summary = new Label("通常は開く必要はありません。ログインし直す、データ保存先を確認する、Helperを閉じる場合に使います。");
+            summary.style.marginTop = 4;
+            summary.style.marginBottom = 8;
+            summary.style.whiteSpace = WhiteSpace.Normal;
+            foldout.Add(summary);
+
+            foldout.Add(BuildLoginSection());
+            foldout.Add(BuildPathsSection());
+
+            return foldout;
+        }
+
         private VisualElement BuildLoginSection()
         {
             var section = new VisualElement();
-            section.style.marginTop = 18;
+            section.style.marginTop = 6;
 
-            var heading = new Label("BOOTHログイン / 同期（WebView2 helper）");
+            var heading = new Label("BOOTHログイン / Helper");
             ApplyFont(heading, FontStyle.Bold);
             heading.style.fontSize = 15;
             section.Add(heading);
@@ -586,7 +607,7 @@ namespace VRCQuickImporter.Editor.UI
         private VisualElement BuildPathsSection()
         {
             var section = new VisualElement();
-            section.style.marginTop = 18;
+            section.style.marginTop = 14;
 
             var heading = new Label("データ / 設定");
             ApplyFont(heading, FontStyle.Bold);
