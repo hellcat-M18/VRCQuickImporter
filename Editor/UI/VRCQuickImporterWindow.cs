@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
@@ -6,18 +8,23 @@ using UnityEngine.UIElements;
 using VRCQuickImporter.Editor.Library;
 using VRCQuickImporter.Editor.Storage;
 using VRCQuickImporter.Editor.WebView;
+using Debug = UnityEngine.Debug;
 
 namespace VRCQuickImporter.Editor.UI
 {
     public sealed class VRCQuickImporterWindow : EditorWindow
     {
-        private const string MockNotice =
-            "この一覧はモックデータ（サンプル）です。BOOTHライブラリとの実際の同期は、今後「ログイン済みのWebView2 helper」から取得する予定です。";
+        private Process _librarySyncProcess;
+        private DateTime _librarySyncStartedAtUtc;
+        private string _libraryStatusOverride = string.Empty;
+        private bool _librarySyncInProgress;
 
-        private const int CardWidth = 228;
+        private const int PreferredCardWidth = 228;
+        private const int MinCardWidth = 190;
+        private const int MaxCardWidth = 270;
         private const int CardPadding = 8;
         private const int CardSpacing = 10;
-        private const int ThumbSize = CardWidth - CardPadding * 2;
+        private const int GridPadding = 10;
 
         [MenuItem("Tools/VRCQuickImporter/開く")]
         public static void Open()
@@ -88,50 +95,96 @@ namespace VRCQuickImporter.Editor.UI
             heading.style.alignSelf = Align.Center;
             headerRow.Add(heading);
 
-            var syncButton = new Button { text = "BOOTHと同期（未実装）" };
-            syncButton.SetEnabled(false);
-            syncButton.tooltip = "ログイン済みのWebView2 helperからライブラリを取得します（今後実装予定）";
+            var syncButton = new Button(StartLibrarySync)
+            {
+                text = _librarySyncInProgress ? "同期中..." : "BOOTHと同期"
+            };
+            syncButton.SetEnabled(!_librarySyncInProgress);
+            syncButton.tooltip = "ログイン済みのWebView2 helperからBOOTHライブラリの商品候補を取得します";
             headerRow.Add(syncButton);
 
             section.Add(headerRow);
 
-            var notice = new HelpBox(MockNotice, HelpBoxMessageType.Info);
+            var products = BoothLibraryStore.LoadProductsOrMock(out var storeStatus);
+            var statusText = string.IsNullOrEmpty(_libraryStatusOverride)
+                ? storeStatus
+                : _libraryStatusOverride + "\n" + storeStatus;
+
+            var notice = new HelpBox(statusText, BoothLibraryStore.HasDatabase ? HelpBoxMessageType.Info : HelpBoxMessageType.Warning);
             notice.style.marginTop = 6;
             section.Add(notice);
 
             section.Add(Spacer(8));
 
-            section.Add(BuildProductGrid());
+            section.Add(BuildProductGrid(products));
 
             return section;
         }
 
-        private VisualElement BuildProductGrid()
+        private VisualElement BuildProductGrid(List<BoothProduct> products)
         {
             // CSS Grid相当は使わず、Row + Wrap でBOOTHスキリスト風に折り返す。
             var grid = new VisualElement();
             grid.style.flexDirection = FlexDirection.Row;
             grid.style.flexWrap = Wrap.Wrap;
             grid.style.backgroundColor = GridBackgroundColor;
-            grid.style.paddingTop = 10;
-            grid.style.paddingBottom = 10;
-            grid.style.paddingLeft = 10;
-            grid.style.paddingRight = 10;
+            grid.style.paddingTop = GridPadding;
+            grid.style.paddingBottom = GridPadding;
+            grid.style.paddingLeft = GridPadding;
+            grid.style.paddingRight = GridPadding;
             SetBorderRadius(grid, 8);
 
-            foreach (var product in BoothLibraryMockData.CreateSampleProducts())
+            foreach (var product in products)
             {
                 var card = BuildProductCard(product);
                 grid.Add(card);
             }
 
+            grid.RegisterCallback<GeometryChangedEvent>(_ => ApplyResponsiveCardLayout(grid));
             return grid;
+        }
+
+        private static void ApplyResponsiveCardLayout(VisualElement grid)
+        {
+            var availableWidth = grid.resolvedStyle.width - GridPadding * 2;
+            if (availableWidth <= 0)
+            {
+                return;
+            }
+
+            var maxColumns = Mathf.Max(1, Mathf.FloorToInt((availableWidth + CardSpacing) / (MinCardWidth + CardSpacing)));
+            var columnCount = Mathf.Max(1, Mathf.FloorToInt((availableWidth + CardSpacing) / (PreferredCardWidth + CardSpacing)));
+            columnCount = Mathf.Min(columnCount, maxColumns);
+
+            var cardWidth = Mathf.Floor((availableWidth - CardSpacing * (columnCount - 1)) / columnCount);
+            while (cardWidth > MaxCardWidth && columnCount < maxColumns)
+            {
+                columnCount++;
+                cardWidth = Mathf.Floor((availableWidth - CardSpacing * (columnCount - 1)) / columnCount);
+            }
+
+            cardWidth = Mathf.Clamp(cardWidth, MinCardWidth, MaxCardWidth);
+            var thumbnailSize = Mathf.Max(1, cardWidth - CardPadding * 2);
+
+            for (var i = 0; i < grid.childCount; i++)
+            {
+                var card = grid[i];
+                card.style.width = cardWidth;
+                card.style.marginRight = (i + 1) % columnCount == 0 ? 0 : CardSpacing;
+
+                var thumbnail = card.Q<VisualElement>("thumbnail");
+                if (thumbnail != null)
+                {
+                    thumbnail.style.width = thumbnailSize;
+                    thumbnail.style.height = thumbnailSize;
+                }
+            }
         }
 
         private static VisualElement BuildProductCard(BoothProduct product)
         {
             var card = new VisualElement();
-            card.style.width = CardWidth;
+            card.style.width = PreferredCardWidth;
             card.style.marginRight = CardSpacing;
             card.style.marginBottom = CardSpacing;
             card.style.paddingTop = CardPadding;
@@ -168,8 +221,9 @@ namespace VRCQuickImporter.Editor.UI
         private static VisualElement BuildThumbnail(BoothProduct product)
         {
             var thumbWrap = new VisualElement();
-            thumbWrap.style.width = ThumbSize;
-            thumbWrap.style.height = ThumbSize;
+            thumbWrap.name = "thumbnail";
+            thumbWrap.style.width = PreferredCardWidth - CardPadding * 2;
+            thumbWrap.style.height = PreferredCardWidth - CardPadding * 2;
             thumbWrap.style.backgroundColor = ThumbnailBackgroundColor;
             SetBorderRadius(thumbWrap, 6);
 
@@ -287,7 +341,7 @@ namespace VRCQuickImporter.Editor.UI
             var section = new VisualElement();
             section.style.marginTop = 18;
 
-            var heading = new Label("BOOTHログイン（WebView2 helper）");
+            var heading = new Label("BOOTHログイン / 同期（WebView2 helper）");
             heading.style.unityFontStyleAndWeight = FontStyle.Bold;
             heading.style.fontSize = 15;
             section.Add(heading);
@@ -299,7 +353,7 @@ namespace VRCQuickImporter.Editor.UI
             section.Add(closeButton);
 
             var help = new HelpBox(
-                "WebView2はBOOTHログイン専用です。BOOTHのライブラリ画面をUnity内にそのまま表示する方針ではありません。" +
+                "WebView2 helperはBOOTHログインと同期処理にのみ使います。BOOTHのライブラリ画面をUnity内にそのまま表示する方針ではありません。" +
                 "ログイン情報はプロジェクト内の専用プロファイルに保存されます。",
                 HelpBoxMessageType.Info);
             help.style.marginTop = 6;
@@ -369,6 +423,83 @@ namespace VRCQuickImporter.Editor.UI
             el.style.borderTopRightRadius = radius;
             el.style.borderBottomLeftRadius = radius;
             el.style.borderBottomRightRadius = radius;
+        }
+
+        private void StartLibrarySync()
+        {
+            if (_librarySyncInProgress)
+            {
+                return;
+            }
+
+            VRCQuickImporterPaths.EnsureDirectories();
+            _librarySyncStartedAtUtc = DateTime.UtcNow;
+            _libraryStatusOverride = "WebView2 helperでBOOTHライブラリ同期を開始しました。ログイン画面が出た場合はログイン後、helper内の「同期」を押してください。";
+            _librarySyncProcess = WebView2HostLauncher.StartLibrarySync(VRCQuickImporterPaths.DatabasePath);
+            if (_librarySyncProcess == null)
+            {
+                _libraryStatusOverride = "WebView2 helperの起動に失敗しました。";
+                RefreshWindow();
+                return;
+            }
+
+            _librarySyncInProgress = true;
+            EditorApplication.update -= PollLibrarySync;
+            EditorApplication.update += PollLibrarySync;
+            RefreshWindow();
+        }
+
+        private void PollLibrarySync()
+        {
+            var databaseUpdated = File.Exists(VRCQuickImporterPaths.DatabasePath) &&
+                                  File.GetLastWriteTimeUtc(VRCQuickImporterPaths.DatabasePath) >= _librarySyncStartedAtUtc.AddSeconds(-1);
+
+            if (databaseUpdated)
+            {
+                FinishLibrarySync("BOOTHライブラリ同期が完了しました。");
+                return;
+            }
+
+            if (_librarySyncProcess == null)
+            {
+                FinishLibrarySync("BOOTHライブラリ同期の状態を確認できませんでした。", keepOverride: true);
+                return;
+            }
+
+            try
+            {
+                if (_librarySyncProcess.HasExited)
+                {
+                    FinishLibrarySync("WebView2 helperが終了しました。同期データが作成されていない場合は、ログイン後にもう一度同期してください。", keepOverride: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] 同期プロセス監視に失敗しました: " + ex.Message);
+                FinishLibrarySync("同期プロセス監視に失敗しました。", keepOverride: true);
+            }
+        }
+
+        private void FinishLibrarySync(string message, bool keepOverride = false)
+        {
+            EditorApplication.update -= PollLibrarySync;
+            _librarySyncInProgress = false;
+            _librarySyncProcess = null;
+            _libraryStatusOverride = keepOverride ? message : string.Empty;
+            Debug.Log("[VRCQuickImporter] " + message);
+            RefreshWindow();
+        }
+
+        private void RefreshWindow()
+        {
+            rootVisualElement.Clear();
+            CreateGUI();
+            Repaint();
+        }
+
+        private void OnDisable()
+        {
+            EditorApplication.update -= PollLibrarySync;
         }
 
         private static void ClearWebViewProfile()

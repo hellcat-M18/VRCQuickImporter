@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace VRCQuickImporter.Editor.Library
@@ -15,18 +16,31 @@ namespace VRCQuickImporter.Editor.Library
     }
 
     /// <summary>
-    /// BOOTH商品に紐づくダウンロードファイルのモデル。
-    /// 現段階ではモックUI用。実取得機能の実装後に実データを流し込む想定。
+    /// database.json のトップレベル。
+    /// JsonUtility互換のため public field で保持する。
     /// </summary>
+    [Serializable]
+    internal sealed class BoothLibraryDocument
+    {
+        public string SchemaVersion = "1";
+        public string SyncedAt = string.Empty;
+        public string SourceUrl = string.Empty;
+        public List<BoothProduct> Products = new List<BoothProduct>();
+    }
+
+    /// <summary>
+    /// BOOTH商品に紐づくダウンロードファイルのモデル。
+    /// </summary>
+    [Serializable]
     internal sealed class BoothDownloadFile
     {
-        public string FileId { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string SizeText { get; set; } = string.Empty;
-        public BoothDownloadFileKind Kind { get; set; } = BoothDownloadFileKind.Unknown;
+        public string FileId = string.Empty;
+        public string Name = string.Empty;
+        public string SizeText = string.Empty;
+        public BoothDownloadFileKind Kind = BoothDownloadFileKind.Unknown;
 
         /// <summary>将来の実DL用。現時点では未使用。</summary>
-        public string DownloadUrl { get; set; } = string.Empty;
+        public string DownloadUrl = string.Empty;
 
         public string DisplayName => string.IsNullOrEmpty(SizeText)
             ? Name
@@ -34,30 +48,31 @@ namespace VRCQuickImporter.Editor.Library
     }
 
     /// <summary>
-    /// BOOTH商品モデル。現段階ではモックUI用。
+    /// BOOTH商品モデル。
     /// </summary>
+    [Serializable]
     internal sealed class BoothProduct
     {
-        public string ProductId { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string ShopName { get; set; } = string.Empty;
+        public string ProductId = string.Empty;
+        public string Name = string.Empty;
+        public string ShopName = string.Empty;
 
-        /// <summary>将来のサムネイル表示用。現時点では未使用（ネットワーク取得はしない）。</summary>
-        public string ThumbnailUrl { get; set; } = string.Empty;
+        /// <summary>将来のサムネイル表示用。現時点ではURL保持のみで、Unity側ではネットワーク取得しない。</summary>
+        public string ThumbnailUrl = string.Empty;
 
-        public string ProductUrl { get; set; } = string.Empty;
-        public List<BoothDownloadFile> Files { get; set; } = new List<BoothDownloadFile>();
+        public string ProductUrl = string.Empty;
+        public List<BoothDownloadFile> Files = new List<BoothDownloadFile>();
 
-        /// <summary>BOOTHのカテゴリ表示名（例: 「3D衣装」「3Dキャラクター」）。モックUI用。</summary>
-        public string CategoryLabel { get; set; } = string.Empty;
+        /// <summary>BOOTHのカテゴリ表示名（例: 「3D衣装」「3Dキャラクター」）。</summary>
+        public string CategoryLabel = string.Empty;
 
-        /// <summary>プラットフォーム/対象バッジ（例: 「VRCHAT」）。モックUI用。</summary>
-        public string BadgeText { get; set; } = "VRCHAT";
+        /// <summary>プラットフォーム/対象バッジ（例: 「VRCHAT」）。</summary>
+        public string BadgeText = "VRCHAT";
 
-        /// <summary>価格表示文字列（例: 「¥3,300」「無料」）。モックUI用。</summary>
-        public string PriceText { get; set; } = string.Empty;
+        /// <summary>価格表示文字列（例: 「¥3,300」「無料」）。</summary>
+        public string PriceText = string.Empty;
 
-        /// <summary>いいね数。モックUI用。</summary>
-        public int LikeCount { get; set; }
+        /// <summary>いいね数。</summary>
+        public int LikeCount;
     }
 }
