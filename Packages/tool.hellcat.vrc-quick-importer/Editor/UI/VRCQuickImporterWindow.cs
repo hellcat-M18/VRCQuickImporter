@@ -123,62 +123,103 @@ namespace VRCQuickImporter.Editor.UI
 
         private VisualElement BuildProductGrid(List<BoothProduct> products)
         {
-            // CSS Grid相当は使わず、Row + Wrap でBOOTHスキリスト風に折り返す。
+            // UI ToolkitのWrap任せだと折り返し境界で余白が不自然になりやすいため、
+            // 列数とカード幅をこちらで決め、行単位で明示的に配置する。
             var grid = new VisualElement();
-            grid.style.flexDirection = FlexDirection.Row;
-            grid.style.flexWrap = Wrap.Wrap;
             grid.style.backgroundColor = GridBackgroundColor;
             grid.style.paddingTop = GridPadding;
             grid.style.paddingBottom = GridPadding;
             grid.style.paddingLeft = GridPadding;
             grid.style.paddingRight = GridPadding;
+            grid.style.alignSelf = Align.Stretch;
+            grid.style.flexGrow = 1;
             SetBorderRadius(grid, 8);
 
-            foreach (var product in products)
-            {
-                var card = BuildProductCard(product);
-                grid.Add(card);
-            }
-
-            grid.RegisterCallback<GeometryChangedEvent>(_ => ApplyResponsiveCardLayout(grid));
+            grid.userData = new ProductGridState(products);
+            grid.RegisterCallback<GeometryChangedEvent>(_ => RebuildProductGridRows(grid));
+            grid.schedule.Execute(() => RebuildProductGridRows(grid));
             return grid;
         }
 
-        private static void ApplyResponsiveCardLayout(VisualElement grid)
+        private static void RebuildProductGridRows(VisualElement grid)
         {
+            if (!(grid.userData is ProductGridState state))
+            {
+                return;
+            }
+
             var availableWidth = grid.resolvedStyle.width - GridPadding * 2;
             if (availableWidth <= 0)
             {
                 return;
             }
 
-            var maxColumns = Mathf.Max(1, Mathf.FloorToInt((availableWidth + CardSpacing) / (MinCardWidth + CardSpacing)));
-            var columnCount = Mathf.Max(1, Mathf.FloorToInt((availableWidth + CardSpacing) / (PreferredCardWidth + CardSpacing)));
-            columnCount = Mathf.Min(columnCount, maxColumns);
-
-            var cardWidth = Mathf.Floor((availableWidth - CardSpacing * (columnCount - 1)) / columnCount);
-            while (cardWidth > MaxCardWidth && columnCount < maxColumns)
+            var layout = CalculateProductGridLayout(availableWidth);
+            if (state.LastColumnCount == layout.ColumnCount && Mathf.Approximately(state.LastCardWidth, layout.CardWidth))
             {
-                columnCount++;
-                cardWidth = Mathf.Floor((availableWidth - CardSpacing * (columnCount - 1)) / columnCount);
+                return;
             }
 
-            cardWidth = Mathf.Clamp(cardWidth, MinCardWidth, MaxCardWidth);
-            var thumbnailSize = Mathf.Max(1, cardWidth - CardPadding * 2);
+            state.LastColumnCount = layout.ColumnCount;
+            state.LastCardWidth = layout.CardWidth;
+            grid.Clear();
 
-            for (var i = 0; i < grid.childCount; i++)
+            for (var index = 0; index < state.Products.Count;)
             {
-                var card = grid[i];
-                card.style.width = cardWidth;
-                card.style.marginRight = (i + 1) % columnCount == 0 ? 0 : CardSpacing;
+                var row = new VisualElement();
+                row.style.flexDirection = FlexDirection.Row;
+                row.style.marginBottom = CardSpacing;
+                grid.Add(row);
 
-                var thumbnail = card.Q<VisualElement>("thumbnail");
-                if (thumbnail != null)
+                for (var column = 0; column < layout.ColumnCount && index < state.Products.Count; column++, index++)
                 {
-                    thumbnail.style.width = thumbnailSize;
-                    thumbnail.style.height = thumbnailSize;
+                    var card = BuildProductCard(state.Products[index]);
+                    ApplyCardSize(card, layout.CardWidth);
+                    card.style.marginRight = column == layout.ColumnCount - 1 ? 0 : CardSpacing;
+                    row.Add(card);
                 }
             }
+        }
+
+        private static ProductGridLayout CalculateProductGridLayout(float availableWidth)
+        {
+            var maxColumns = Mathf.Max(1, Mathf.FloorToInt((availableWidth + CardSpacing) / (MinCardWidth + CardSpacing)));
+            var bestColumns = 1;
+            var bestWidth = Mathf.Clamp(availableWidth, MinCardWidth, MaxCardWidth);
+            var bestScore = float.MaxValue;
+
+            for (var columns = 1; columns <= maxColumns; columns++)
+            {
+                var width = Mathf.Floor((availableWidth - CardSpacing * (columns - 1)) / columns);
+                if (width < MinCardWidth || width > MaxCardWidth)
+                {
+                    continue;
+                }
+
+                var score = Mathf.Abs(width - PreferredCardWidth);
+                if (score < bestScore || Mathf.Approximately(score, bestScore) && columns > bestColumns)
+                {
+                    bestScore = score;
+                    bestColumns = columns;
+                    bestWidth = width;
+                }
+            }
+
+            return new ProductGridLayout(bestColumns, bestWidth);
+        }
+
+        private static void ApplyCardSize(VisualElement card, float cardWidth)
+        {
+            card.style.width = cardWidth;
+            var thumbnail = card.Q<VisualElement>("thumbnail");
+            if (thumbnail == null)
+            {
+                return;
+            }
+
+            var thumbnailSize = Mathf.Max(1, cardWidth - CardPadding * 2);
+            thumbnail.style.width = thumbnailSize;
+            thumbnail.style.height = thumbnailSize;
         }
 
         private static VisualElement BuildProductCard(BoothProduct product)
@@ -564,5 +605,29 @@ namespace VRCQuickImporter.Editor.UI
         private static Color CategoryPillTextColor => new Color(0.2f, 0.2f, 0.2f, 1f);
 
         private static Color VrchatBadgeBgColor => new Color(0.11f, 0.62f, 0.54f, 1f);
+
+        private sealed class ProductGridState
+        {
+            public readonly List<BoothProduct> Products;
+            public int LastColumnCount = -1;
+            public float LastCardWidth = -1f;
+
+            public ProductGridState(List<BoothProduct> products)
+            {
+                Products = products ?? new List<BoothProduct>();
+            }
+        }
+
+        private readonly struct ProductGridLayout
+        {
+            public readonly int ColumnCount;
+            public readonly float CardWidth;
+
+            public ProductGridLayout(int columnCount, float cardWidth)
+            {
+                ColumnCount = columnCount;
+                CardWidth = cardWidth;
+            }
+        }
     }
 }
