@@ -22,6 +22,7 @@ namespace VRCQuickImporter.Editor.UI
         private bool _librarySyncInProgress;
         private bool _showSyncWindow;
         private Vector2 _pendingScrollOffset;
+        private bool _needsScrollRestore;
         private int _currentMaxPage;
         private bool _reachedLastPage;
         private int _syncRequestedPage = 1;
@@ -208,7 +209,7 @@ namespace VRCQuickImporter.Editor.UI
             return grid;
         }
 
-        private static void RebuildProductGridRows(VisualElement grid)
+        private void RebuildProductGridRows(VisualElement grid)
         {
             if (!(grid.userData is ProductGridState state))
             {
@@ -218,12 +219,18 @@ namespace VRCQuickImporter.Editor.UI
             var availableWidth = grid.resolvedStyle.width - GridPadding * 2;
             if (availableWidth <= 0)
             {
+                // レイアウト未確定: 後の GeometryChangedEvent で再試行される
                 return;
             }
 
             var layout = CalculateProductGridLayout(availableWidth);
             if (state.LastColumnCount == layout.ColumnCount && Mathf.Approximately(state.LastCardWidth, layout.CardWidth))
             {
+                // 列数変更なしでも初回スクロール復元が必要な場合
+                if (_needsScrollRestore)
+                {
+                    RestoreScrollOffsetAfterLayout();
+                }
                 return;
             }
 
@@ -246,6 +253,26 @@ namespace VRCQuickImporter.Editor.UI
                     row.Add(card);
                 }
             }
+
+            // 行追加完了後にスクロール位置を復元する
+            if (_needsScrollRestore)
+            {
+                RestoreScrollOffsetAfterLayout();
+            }
+        }
+
+        private void RestoreScrollOffsetAfterLayout()
+        {
+            _needsScrollRestore = false;
+            // 行追加直後はレイアウトが未確定のため、次フレームで復元する
+            rootVisualElement.schedule.Execute(() =>
+            {
+                var scroll = rootVisualElement.Q<ScrollView>();
+                if (scroll != null)
+                {
+                    scroll.scrollOffset = _pendingScrollOffset;
+                }
+            });
         }
 
         private static ProductGridLayout CalculateProductGridLayout(float availableWidth)
@@ -766,16 +793,8 @@ namespace VRCQuickImporter.Editor.UI
             rootVisualElement.Clear();
             CreateGUI();
 
-            // レイアウト確定後にスクロール位置を復元する
-            rootVisualElement.schedule.Execute(() =>
-            {
-                var scroll = rootVisualElement.Q<ScrollView>();
-                if (scroll != null)
-                {
-                    scroll.scrollOffset = _pendingScrollOffset;
-                }
-            });
-
+            // RebuildProductGridRows の行追加完了後にスクロール位置を復元する
+            _needsScrollRestore = true;
             Repaint();
         }
 
