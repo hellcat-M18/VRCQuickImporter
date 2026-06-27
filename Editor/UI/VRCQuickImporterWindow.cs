@@ -6,7 +6,6 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
-using UnityEngine.TextCore.Text;
 using VRCQuickImporter.Editor.Library;
 using VRCQuickImporter.Editor.Storage;
 using VRCQuickImporter.Editor.Thumbnails;
@@ -828,14 +827,16 @@ namespace VRCQuickImporter.Editor.UI
 
         /// <summary>
         /// Noto Sans JP をルートに適用し、子要素にも継承させる。
-        /// -unity-font-definition は -unity-font より優先されるため、こちらに設定する。
+        /// -unity-font-definition は -unity-font より優先されるため、
+        /// まず definition を None でクリアし、その後に unityFont を設定する。
         /// </summary>
         private static void ApplyDefaultFont(VisualElement element)
         {
-            var definition = BoothFontProvider.ResolveDefinition(FontStyle.Normal);
-            if (definition.HasValue)
+            element.style.unityFontDefinition = StyleKeyword.None;
+            var font = BoothFontProvider.Resolve(FontStyle.Normal);
+            if (font != null)
             {
-                element.style.unityFontDefinition = definition.Value;
+                element.style.unityFont = font;
             }
         }
 
@@ -846,10 +847,11 @@ namespace VRCQuickImporter.Editor.UI
         /// </summary>
         private static void ApplyFont(VisualElement element, FontStyle style)
         {
-            var definition = BoothFontProvider.ResolveDefinition(style);
-            if (definition.HasValue)
+            element.style.unityFontDefinition = StyleKeyword.None;
+            var font = BoothFontProvider.Resolve(style);
+            if (font != null)
             {
-                element.style.unityFontDefinition = definition.Value;
+                element.style.unityFont = font;
             }
             element.style.unityFontStyleAndWeight = FontStyle.Normal;
         }
