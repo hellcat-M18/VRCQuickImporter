@@ -52,7 +52,9 @@ namespace VRCQuickImporter.Editor.WebView
                 "--sync-library",
                 "--exit-after-sync",
                 Arg("--output", outputPath),
-                Arg("--page", page.ToString())
+                Arg("--page", page.ToString()),
+                Arg("--rate-limit-file", VRCQuickImporterPaths.BoothLibraryAccessStampPath),
+                Arg("--min-access-interval-ms", "2000")
             };
 
             if (headless)
