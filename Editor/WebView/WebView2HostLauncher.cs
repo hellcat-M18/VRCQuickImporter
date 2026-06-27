@@ -54,7 +54,7 @@ namespace VRCQuickImporter.Editor.WebView
                 Arg("--output", outputPath),
                 Arg("--page", page.ToString()),
                 Arg("--rate-limit-file", VRCQuickImporterPaths.BoothLibraryAccessStampPath),
-                Arg("--min-access-interval-ms", "2000")
+                Arg("--min-access-interval-ms", "5000")
             };
 
             if (headless)

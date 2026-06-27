@@ -45,7 +45,7 @@ namespace VRCQuickImporter.Editor.UI
         internal event System.Action<BoothProduct, BoothDownloadFile> OnImportRequested;
 
         private const float BackgroundSyncTimeoutSeconds = 120f;
-        private const double BoothLibraryAccessIntervalSeconds = 2.0;
+        private const double BoothLibraryAccessIntervalSeconds = 5.0;
         private const string ConfirmedBoothAccessPrefKey = "VRCQuickImporter.confirmedBoothAccess";
         private const int PreferredCardWidth = 228;
         private const int MinCardWidth = 190;
@@ -674,7 +674,7 @@ namespace VRCQuickImporter.Editor.UI
             if (!EditorUtility.DisplayDialog(
                     "完全リフレッシュ",
                     "BOOTHライブラリを最後のページまで再取得し、ローカルJSONキャッシュを丸ごと置き換えます。\n\n" +
-                    "ページ間は最低2秒待機します。商品数が多い場合は時間がかかります。続行しますか？",
+                    "ページ間は最低5秒待機します。商品数が多い場合は時間がかかります。続行しますか？",
                     "完全リフレッシュ",
                     "キャンセル"))
             {
@@ -690,7 +690,7 @@ namespace VRCQuickImporter.Editor.UI
                 "初回セットアップ",
                 "BOOTHライブラリを最後のページまで取得し、このUnityプロジェクト内にローカルJSONキャッシュを作成します。\n\n" +
                 "・BOOTH購入履歴の複数ページにアクセスします。\n" +
-                "・ページ間は最低2秒待機します。\n" +
+                "・ページ間は最低5秒待機します。\n" +
                 "・取得データは Library/VRCQuickImporter/database.json に保存します。\n" +
                 "・以後の同期は基本的に増分確認になります。\n\n続行しますか？",
                 "初回セットアップを開始",
