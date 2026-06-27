@@ -59,8 +59,10 @@ namespace VRCQuickImporter.Editor.Import
 
             Debug.Log($"[VRCQuickImporter] ダウンロード開始: {file.DownloadUrl} → {downloadPath}");
 
-            // プロセス完了をポーリング
+            // プロセス完了をポーリング（進捗表示付き）
             var startedAt = DateTime.UtcNow;
+            var progressPath = Path.Combine(VRCQuickImporterPaths.LogsDirectory, "download-progress.json");
+            var lastProgressText = string.Empty;
             EditorApplication.update -= PollDownload;
             EditorApplication.update += PollDownload;
 
@@ -75,21 +77,68 @@ namespace VRCQuickImporter.Editor.Import
                         {
                             EditorApplication.update -= PollDownload;
                             try { process.Kill(); } catch { }
+                            EditorUtility.ClearProgressBar();
                             EditorUtility.DisplayDialog(
                                 "VRCQuickImporter",
                                 "ダウンロードがタイムアウトしました。",
                                 "OK");
+                            return;
                         }
+
+                        // 進捗ファイルを読んで表示
+                        var progressText = "ダウンロード中...";
+                        var pct = -1f;
+                        try
+                        {
+                            if (File.Exists(progressPath))
+                            {
+                                var json = File.ReadAllText(progressPath);
+                                var doc = JsonUtility.FromJson<DownloadProgressInfo>(json);
+                                if (doc != null && !string.IsNullOrEmpty(doc.status))
+                                {
+                                    if (doc.percent >= 0)
+                                    {
+                                        progressText = $"ダウンロード中... {doc.percent}%";
+                                        pct = doc.percent / 100f;
+                                    }
+                                    else if (doc.status == "started")
+                                    {
+                                        progressText = "ダウンロード準備中...";
+                                    }
+                                    else if (doc.status == "downloading")
+                                    {
+                                        var mbReceived = doc.bytesReceived / 1048576.0;
+                                        var mbTotal = doc.bytesTotal > 0 ? doc.bytesTotal / 1048576.0 : 0;
+                                        progressText = mbTotal > 0
+                                            ? $"ダウンロード中... {mbReceived:F1} / {mbTotal:F1} MB"
+                                            : $"ダウンロード中... {mbReceived:F1} MB";
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+
+                        if (progressText != lastProgressText || pct >= 0)
+                        {
+                            lastProgressText = progressText;
+                            if (pct >= 0)
+                                EditorUtility.DisplayProgressBar("VRCQuickImporter", progressText, pct);
+                            else
+                                EditorUtility.DisplayProgressBar("VRCQuickImporter", progressText, -1f);
+                        }
+
                         return;
                     }
                 }
                 catch
                 {
                     EditorApplication.update -= PollDownload;
+                    EditorUtility.ClearProgressBar();
                     return;
                 }
 
                 EditorApplication.update -= PollDownload;
+                EditorUtility.ClearProgressBar();
 
                 if (!File.Exists(downloadPath))
                 {
@@ -322,6 +371,17 @@ namespace VRCQuickImporter.Editor.Import
             {
                 CopyDirectory(dir, Path.Combine(target, Path.GetFileName(dir)));
             }
+        }
+
+        [Serializable]
+        private class DownloadProgressInfo
+        {
+            public string status = string.Empty;
+            public int percent = -1;
+            public long bytesReceived;
+            public long bytesTotal;
+            public string outputPath = string.Empty;
+            public string updatedAt = string.Empty;
         }
     }
 }

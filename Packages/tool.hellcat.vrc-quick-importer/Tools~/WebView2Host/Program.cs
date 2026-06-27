@@ -196,6 +196,8 @@ internal sealed class BrowserForm : Form
                     e.ResultFilePath = _options.OutputPath;
                     _currentDownload = e.DownloadOperation;
                     _currentDownload.StateChanged += OnDownloadStateChanged;
+                    _currentDownload.BytesReceivedChanged += OnDownloadBytesReceivedChanged;
+                    WriteProgress(0, 0, 0, "started");
                     _statusLabel.Text = "ダウンロード開始: " + e.ResultFilePath;
                 }
                 else
@@ -402,13 +404,51 @@ internal sealed class BrowserForm : Form
         if (state == CoreWebView2DownloadState.Completed)
         {
             _statusLabel.Text = "ダウンロード完了: " + _options.OutputPath;
+            WriteProgress(100, 0, 100, "completed");
             _downloadCompletionSource?.TrySetResult(true);
+            BeginInvoke(Close);
         }
         else if (state == CoreWebView2DownloadState.Interrupted)
         {
             _statusLabel.Text = "ダウンロードが中断されました。";
+            WriteProgress(0, 0, 0, "interrupted");
             _downloadCompletionSource?.TrySetResult(false);
+            BeginInvoke(Close);
         }
+    }
+
+    private void OnDownloadBytesReceivedChanged(object? sender, object e)
+    {
+        if (_currentDownload == null) return;
+        try
+        {
+            dynamic br = _currentDownload.BytesReceived;
+            dynamic tt = _currentDownload.TotalBytesToReceive;
+            long received = System.Convert.ToInt64(br);
+            long total = tt == null ? 0 : System.Convert.ToInt64(tt);
+            var pct = total > 0 ? (int)(received * 100 / total) : -1;
+            WriteProgress(pct, received, total, "downloading");
+        }
+        catch { }
+    }
+
+    private void WriteProgress(int pct, long received, long total, string status)
+    {
+        try
+        {
+            var progressPath = Path.Combine(_options.LogDirectory, "download-progress.json");
+            var json = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                status,
+                percent = pct,
+                bytesReceived = received,
+                bytesTotal = total,
+                outputPath = _options.OutputPath,
+                updatedAt = DateTimeOffset.Now.ToString("o")
+            }, new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
+            File.WriteAllText(progressPath, json);
+        }
+        catch { }
     }
 
     private async Task SyncLibraryAsync(bool manual)
