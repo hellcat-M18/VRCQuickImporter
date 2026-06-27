@@ -1,5 +1,6 @@
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace VRCQuickImporter.Editor.UI
 {
@@ -43,6 +44,37 @@ namespace VRCQuickImporter.Editor.UI
 
                 return _bold;
             }
+        }
+
+        /// <summary>
+        /// ルート要素に通常ウエイトのフォントを適用し、子要素に継承させる。
+        /// -unity-font-definition は -unity-font より優先されるため、
+        /// まず definition を None でクリアしてから unityFont を設定する。
+        /// </summary>
+        public static void ApplyToRoot(VisualElement element)
+        {
+            element.style.unityFontDefinition = StyleKeyword.None;
+            var font = Resolve(FontStyle.Normal);
+            if (font != null)
+            {
+                element.style.unityFont = font;
+            }
+        }
+
+        /// <summary>
+        /// 要素にウエイトに応じたフォントを適用する。
+        /// BoldにはBold用フォントを直接割り当て、合成太字（二重太字）を避けるため
+        /// unityFontStyleAndWeight は Normal にする。
+        /// </summary>
+        public static void Apply(VisualElement element, FontStyle style)
+        {
+            element.style.unityFontDefinition = StyleKeyword.None;
+            var font = Resolve(style);
+            if (font != null)
+            {
+                element.style.unityFont = font;
+            }
+            element.style.unityFontStyleAndWeight = FontStyle.Normal;
         }
 
         /// <summary>
