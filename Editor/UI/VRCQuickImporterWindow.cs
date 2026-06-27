@@ -41,12 +41,15 @@ namespace VRCQuickImporter.Editor.UI
         private int _syncFetchedPageCount;
         private bool _librarySyncWaitingForRateLimit;
         private DateTime _librarySyncLaunchAtUtc;
+        private bool _productNameSearchLoaded;
+        private string _productNameSearchQuery = string.Empty;
 
         internal event System.Action<BoothProduct, BoothDownloadFile> OnImportRequested;
 
         private const float BackgroundSyncTimeoutSeconds = 120f;
         private const double BoothLibraryAccessIntervalSeconds = 5.0;
         private const string ConfirmedBoothAccessPrefKey = "VRCQuickImporter.confirmedBoothAccess";
+        private const string ProductNameSearchPrefKey = "VRCQuickImporter.productNameSearch";
         private const int PreferredCardWidth = 228;
         private const int MinCardWidth = 190;
         private const int MaxCardWidth = 270;
@@ -138,7 +141,10 @@ namespace VRCQuickImporter.Editor.UI
                 BoothLibraryStore.TryGetPageState(out _currentMaxPage, out _reachedLastPage);
             }
 
+            EnsureProductNameSearchLoaded();
             var products = BoothLibraryStore.LoadProducts(out var storeStatus, out var dataState);
+            var searchActive = IsProductNameSearchActive() && products.Count > 0;
+            var filteredProducts = searchActive ? FilterProductsByName(products) : products;
 
             var headerRow = new VisualElement();
             headerRow.style.flexDirection = FlexDirection.Row;
@@ -189,7 +195,10 @@ namespace VRCQuickImporter.Editor.UI
 
             section.Add(VRCQuickImporterTheme.Spacer(8));
 
-            section.Add(BuildProductGrid(products, dataState));
+            var grid = BuildProductGrid(filteredProducts, dataState, searchActive);
+            section.Add(BuildProductNameSearchPanel(products, grid));
+            section.Add(VRCQuickImporterTheme.Spacer(8));
+            section.Add(grid);
 
             return section;
         }
@@ -398,7 +407,128 @@ namespace VRCQuickImporter.Editor.UI
             return string.Join("\n", lines);
         }
 
-        private VisualElement BuildProductGrid(List<BoothProduct> products, BoothLibraryDataState dataState)
+        private void EnsureProductNameSearchLoaded()
+        {
+            if (_productNameSearchLoaded)
+            {
+                return;
+            }
+
+            _productNameSearchQuery = EditorPrefs.GetString(ProductNameSearchPrefKey, string.Empty);
+            _productNameSearchLoaded = true;
+        }
+
+        private bool IsProductNameSearchActive()
+        {
+            return !string.IsNullOrWhiteSpace(_productNameSearchQuery);
+        }
+
+        private List<BoothProduct> FilterProductsByName(List<BoothProduct> products)
+        {
+            if (products == null)
+            {
+                return new List<BoothProduct>();
+            }
+
+            var query = (_productNameSearchQuery ?? string.Empty).Trim();
+            if (query.Length == 0)
+            {
+                return products;
+            }
+
+            return products
+                .Where(product => !string.IsNullOrEmpty(product?.Name) && product.Name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+        }
+
+        private VisualElement BuildProductNameSearchPanel(List<BoothProduct> allProducts, VisualElement grid)
+        {
+            allProducts = allProducts ?? new List<BoothProduct>();
+
+            var panel = VRCQuickImporterTheme.MakeShell(VRCQuickImporterTheme.RadiusCardOuter, VRCQuickImporterTheme.SpaceXs);
+            panel.name = "product-name-search-panel";
+
+            var core = VRCQuickImporterTheme.MakeCore(VRCQuickImporterTheme.RadiusCardInner, VRCQuickImporterTheme.SpaceMd);
+            core.style.flexDirection = FlexDirection.Row;
+            core.style.alignItems = Align.Center;
+            panel.Add(core);
+
+            var searchField = new TextField("商品名検索")
+            {
+                value = _productNameSearchQuery ?? string.Empty
+            };
+            searchField.name = "product-name-search-field";
+            searchField.tooltip = "ローカルJSONキャッシュ内の商品名だけを検索します。BOOTHへの追加アクセスは行いません。";
+            searchField.style.flexGrow = 1;
+            BoothFontProvider.Apply(searchField, FontStyle.Normal);
+            core.Add(searchField);
+
+            var resultLabel = new Label(BuildSearchResultText(allProducts.Count, FilterProductsByName(allProducts).Count));
+            resultLabel.name = "product-name-search-result";
+            resultLabel.style.marginLeft = VRCQuickImporterTheme.SpaceMd;
+            resultLabel.style.color = VRCQuickImporterTheme.TextMuted;
+            resultLabel.style.fontSize = VRCQuickImporterTheme.FontCaption;
+            BoothFontProvider.Apply(resultLabel, FontStyle.Normal);
+            core.Add(resultLabel);
+
+            var clearButton = new Button(() =>
+            {
+                _productNameSearchQuery = string.Empty;
+                EditorPrefs.DeleteKey(ProductNameSearchPrefKey);
+                searchField.SetValueWithoutNotify(string.Empty);
+                ApplyProductNameSearchToGrid(allProducts, grid, resultLabel);
+            })
+            {
+                text = "クリア"
+            };
+            clearButton.name = "product-name-search-clear";
+            clearButton.style.marginLeft = VRCQuickImporterTheme.SpaceSm;
+            core.Add(clearButton);
+
+            searchField.RegisterValueChangedCallback(evt =>
+            {
+                _productNameSearchQuery = evt.newValue ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(_productNameSearchQuery))
+                {
+                    EditorPrefs.DeleteKey(ProductNameSearchPrefKey);
+                }
+                else
+                {
+                    EditorPrefs.SetString(ProductNameSearchPrefKey, _productNameSearchQuery);
+                }
+
+                ApplyProductNameSearchToGrid(allProducts, grid, resultLabel);
+            });
+
+            return panel;
+        }
+
+        private void ApplyProductNameSearchToGrid(List<BoothProduct> allProducts, VisualElement grid, Label resultLabel)
+        {
+            var filtered = FilterProductsByName(allProducts);
+            resultLabel.text = BuildSearchResultText(allProducts?.Count ?? 0, filtered.Count);
+
+            if (grid?.userData is ProductGridState state)
+            {
+                state.Products = filtered;
+                state.IsNameFiltered = IsProductNameSearchActive() && (allProducts?.Count ?? 0) > 0;
+                state.LastColumnCount = -1;
+                state.LastCardWidth = -1f;
+                RebuildProductGridRows(grid);
+            }
+        }
+
+        private string BuildSearchResultText(int totalCount, int filteredCount)
+        {
+            if (!IsProductNameSearchActive() || totalCount <= 0)
+            {
+                return totalCount + "件";
+            }
+
+            return filteredCount + " / " + totalCount + "件";
+        }
+
+        private VisualElement BuildProductGrid(List<BoothProduct> products, BoothLibraryDataState dataState, bool isNameFiltered)
         {
             // UI ToolkitのWrap任せだと折り返し境界で余白が不自然になりやすいため、
             // 列数とカード幅をこちらで決め、行単位で明示的に配置する。
@@ -412,13 +542,13 @@ namespace VRCQuickImporter.Editor.UI
             grid.style.flexGrow = 1;
             VRCQuickImporterTheme.SetBorderRadius(grid, VRCQuickImporterTheme.RadiusImage);
 
-            if (products == null || products.Count == 0)
+            if ((products == null || products.Count == 0) && !isNameFiltered)
             {
                 grid.Add(BuildGridStateBlock(dataState));
                 return grid;
             }
 
-            grid.userData = new ProductGridState(products);
+            grid.userData = new ProductGridState(products, dataState, isNameFiltered);
             grid.RegisterCallback<GeometryChangedEvent>(_ => RebuildProductGridRows(grid));
             grid.schedule.Execute(() => RebuildProductGridRows(grid));
             return grid;
@@ -428,6 +558,17 @@ namespace VRCQuickImporter.Editor.UI
         {
             if (!(grid.userData is ProductGridState state))
             {
+                return;
+            }
+
+            if (state.Products == null || state.Products.Count == 0)
+            {
+                grid.Clear();
+                grid.Add(state.IsNameFiltered ? BuildNameSearchEmptyBlock() : BuildGridStateBlock(state.DataState));
+                if (_needsScrollRestore)
+                {
+                    RestoreScrollOffsetAfterLayout();
+                }
                 return;
             }
 
@@ -500,6 +641,42 @@ namespace VRCQuickImporter.Editor.UI
             {
                 scroll.scrollOffset = _pendingScrollOffset;
             }).StartingIn(200);
+        }
+
+        private VisualElement BuildNameSearchEmptyBlock()
+        {
+            var shell = VRCQuickImporterTheme.MakeShell(VRCQuickImporterTheme.RadiusCardOuter, VRCQuickImporterTheme.SpaceSm);
+            shell.style.minHeight = 180;
+            shell.style.alignSelf = Align.Stretch;
+
+            var core = VRCQuickImporterTheme.MakeCore(VRCQuickImporterTheme.RadiusCardInner, VRCQuickImporterTheme.SpaceXl);
+            core.style.minHeight = 168;
+            core.style.alignItems = Align.Center;
+            core.style.justifyContent = Justify.Center;
+            shell.Add(core);
+
+            var badge = MakeStateChip("検索結果 0件");
+            badge.style.marginBottom = VRCQuickImporterTheme.SpaceMd;
+            core.Add(badge);
+
+            var title = new Label("一致する商品名がありません");
+            BoothFontProvider.Apply(title, FontStyle.Bold);
+            title.style.fontSize = 16;
+            title.style.color = VRCQuickImporterTheme.TextPrimary;
+            title.style.unityTextAlign = TextAnchor.MiddleCenter;
+            core.Add(title);
+
+            var body = new Label("検索語を短くするか、表記ゆれを変えて試してください。検索はローカルJSONキャッシュ内の商品名だけを対象にしています。");
+            BoothFontProvider.Apply(body, FontStyle.Normal);
+            body.style.fontSize = VRCQuickImporterTheme.FontBody;
+            body.style.color = VRCQuickImporterTheme.TextMuted;
+            body.style.whiteSpace = WhiteSpace.Normal;
+            body.style.unityTextAlign = TextAnchor.MiddleCenter;
+            body.style.marginTop = VRCQuickImporterTheme.SpaceSm;
+            body.style.maxWidth = 520;
+            core.Add(body);
+
+            return shell;
         }
 
         private static ProductGridLayout CalculateProductGridLayout(float availableWidth)
@@ -1164,13 +1341,17 @@ namespace VRCQuickImporter.Editor.UI
 
         private sealed class ProductGridState
         {
-            public readonly List<BoothProduct> Products;
+            public List<BoothProduct> Products;
+            public readonly BoothLibraryDataState DataState;
+            public bool IsNameFiltered;
             public int LastColumnCount = -1;
             public float LastCardWidth = -1f;
 
-            public ProductGridState(List<BoothProduct> products)
+            public ProductGridState(List<BoothProduct> products, BoothLibraryDataState dataState, bool isNameFiltered)
             {
                 Products = products ?? new List<BoothProduct>();
+                DataState = dataState;
+                IsNameFiltered = isNameFiltered;
             }
         }
 
