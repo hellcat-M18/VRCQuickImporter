@@ -26,6 +26,12 @@ namespace VRCQuickImporter.Editor.Library
         public string SyncedAt = string.Empty;
         public string SourceUrl = string.Empty;
         public List<BoothProduct> Products = new List<BoothProduct>();
+
+        /// <summary>「もっと読み込む」でどこまで取得したか（ページ番号）。</summary>
+        public int MaxPage = 0;
+
+        /// <summary>最終ページまで取得済みの場合 true。</summary>
+        public bool ReachedLastPage = false;
     }
 
     /// <summary>

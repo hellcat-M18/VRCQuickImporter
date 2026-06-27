@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 using VRCQuickImporter.Editor.Storage;
 
@@ -43,9 +44,121 @@ namespace VRCQuickImporter.Editor.Library
 
         public static bool HasDatabase => File.Exists(VRCQuickImporterPaths.DatabasePath);
 
+        /// <summary>
+        /// database.json の MaxPage / ReachedLastPage を UI 表示用に取得します。
+        /// </summary>
+        public static void TryGetPageState(out int maxPage, out bool reachedLast)
+        {
+            maxPage = 0;
+            reachedLast = false;
+            if (!File.Exists(VRCQuickImporterPaths.DatabasePath)) return;
+            try
+            {
+                var document = JsonUtility.FromJson<BoothLibraryDocument>(File.ReadAllText(VRCQuickImporterPaths.DatabasePath));
+                if (document == null) return;
+                maxPage = document.MaxPage;
+                reachedLast = document.ReachedLastPage;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] ページ状態の読み込みに失敗しました: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// pending-page.json を本 database.json に取り込みます。
+        /// replace=true の場合はページ1件取得（全件置き換え）。
+        /// </summary>
+        public static PageMergeResult MergePendingPage(int requestedPage, bool replace)
+        {
+            var result = new PageMergeResult();
+
+            if (!File.Exists(VRCQuickImporterPaths.PendingPagePath))
+            {
+                return result;
+            }
+
+            var pending = TryLoadDocument(VRCQuickImporterPaths.PendingPagePath);
+            var pageProducts = pending?.Products ?? new List<BoothProduct>();
+            result.PageHadProducts = pageProducts.Count > 0;
+
+            BoothLibraryDocument main;
+            if (replace || !File.Exists(VRCQuickImporterPaths.DatabasePath))
+            {
+                main = new BoothLibraryDocument
+                {
+                    SchemaVersion = "1",
+                    SyncedAt = pending?.SyncedAt ?? string.Empty,
+                    SourceUrl = pending?.SourceUrl ?? string.Empty,
+                    Products = new List<BoothProduct>(pageProducts),
+                    MaxPage = pageProducts.Count > 0 ? Math.Max(1, requestedPage) : 0,
+                    ReachedLastPage = pageProducts.Count == 0
+                };
+            }
+            else
+            {
+                main = TryLoadDocument(VRCQuickImporterPaths.DatabasePath) ?? new BoothLibraryDocument();
+                var seen = new HashSet<string>(main.Products.Select(p => p.ProductId));
+                foreach (var product in pageProducts)
+                {
+                    if (seen.Add(product.ProductId))
+                    {
+                        main.Products.Add(product);
+                    }
+                }
+
+                main.SyncedAt = pending?.SyncedAt ?? main.SyncedAt;
+                main.MaxPage = pageProducts.Count > 0 ? Math.Max(main.MaxPage, requestedPage) : main.MaxPage;
+                main.ReachedLastPage = pageProducts.Count == 0 || main.ReachedLastPage;
+            }
+
+            NormalizeDocument(main);
+            SaveDocument(main);
+
+            try
+            {
+                File.Delete(VRCQuickImporterPaths.PendingPagePath);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] pending-page.json の削除に失敗しました: " + ex.Message);
+            }
+
+            result.TotalProducts = main.Products.Count;
+            result.MaxPage = main.MaxPage;
+            result.ReachedLastPage = main.ReachedLastPage;
+            return result;
+        }
+
+        private static BoothLibraryDocument TryLoadDocument(string path)
+        {
+            try
+            {
+                return JsonUtility.FromJson<BoothLibraryDocument>(File.ReadAllText(path));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] ドキュメントの読み込みに失敗しました: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static void SaveDocument(BoothLibraryDocument document)
+        {
+            File.WriteAllText(VRCQuickImporterPaths.DatabasePath, JsonUtility.ToJson(document, true));
+        }
+
+        public struct PageMergeResult
+        {
+            public int TotalProducts;
+            public int MaxPage;
+            public bool ReachedLastPage;
+            public bool PageHadProducts;
+        }
+
         private static void NormalizeDocument(BoothLibraryDocument document)
         {
-            foreach (var product in document.Products)
+            foreach (var product in document.Products ?? (document.Products = new List<BoothProduct>()))
             {
                 product.Name = Normalize(product.Name);
                 product.ShopName = Normalize(product.ShopName);

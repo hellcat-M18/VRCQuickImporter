@@ -228,11 +228,10 @@ internal sealed class BrowserForm : Form
         }
 
         _autoSyncAttempted = true;
-        await Task.Delay(1800);
-        await SyncAllLibraryPagesAsync();
+        await SyncSingleLibraryPageAsync();
     }
 
-    private async Task SyncAllLibraryPagesAsync()
+    private async Task SyncSingleLibraryPageAsync()
     {
         if (_syncRunning) return;
 
@@ -242,101 +241,58 @@ internal sealed class BrowserForm : Form
             return;
         }
 
-        var currentUrl = _webView.Source?.ToString() ?? string.Empty;
-        if (!IsBoothLibraryUrl(currentUrl))
-        {
-            _statusLabel.Text = "BOOTHライブラリへ移動します。ログイン画面が出た場合はログイン後にもう一度「同期」を押してください。";
-            Navigate(LibraryUrl);
-            return;
-        }
+        var page = Math.Max(1, _options.Page);
+        var pageUrl = page == 1 ? LibraryUrl : $"{LibraryUrl}?page={page}";
 
         _syncRunning = true;
         _syncButton.Enabled = false;
 
         try
         {
-            var allProducts = new List<JsonElement>();
-            var seenIds = new HashSet<string>(StringComparer.Ordinal);
-            var page = 1;
-            var maxPages = 100;
-
-            while (page <= maxPages)
+            if (!string.Equals(_webView.Source?.ToString() ?? string.Empty, pageUrl, StringComparison.OrdinalIgnoreCase))
             {
-                var pageUrl = page == 1 ? LibraryUrl : $"{LibraryUrl}?page={page}";
                 _statusLabel.Text = $"BOOTHライブラリ {page}ページ目を読み込み中...";
-
-                if (!string.Equals(_webView.Source?.ToString() ?? string.Empty, pageUrl, StringComparison.OrdinalIgnoreCase))
-                {
-                    Navigate(pageUrl);
-                    await WaitForLibraryNavigationAsync();
-                }
-
-                var urlAfterWait = _webView.Source?.ToString() ?? string.Empty;
-                if (!IsBoothLibraryUrl(urlAfterWait))
-                {
-                    _statusLabel.Text = "BOOTHライブラリではないページに移動しました。ログインが必要な可能性があります。";
-                    break;
-                }
-
-                await Task.Delay(1200);
-                var rawJson = await _webView.CoreWebView2.ExecuteScriptAsync(LibraryExtractionScript);
-                var pageDocument = JsonDocument.Parse(rawJson);
-                var pageCount = 0;
-
-                if (pageDocument.RootElement.TryGetProperty("Products", out var products) && products.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var product in products.EnumerateArray())
-                    {
-                        if (product.TryGetProperty("ProductId", out var idElement) && idElement.ValueKind == JsonValueKind.String)
-                        {
-                            var id = idElement.GetString() ?? string.Empty;
-                            if (!string.IsNullOrEmpty(id) && seenIds.Add(id))
-                            {
-                                allProducts.Add(product.Clone());
-                            }
-                        }
-                    }
-
-                    pageCount = products.GetArrayLength();
-                }
-
-                await SaveCurrentHtmlAsync($"last-library-page-{page:D3}-html.json.txt", showStatus: false);
-
-                if (pageCount == 0)
-                {
-                    break;
-                }
-
-                page++;
+                Navigate(pageUrl);
+                await WaitForLibraryNavigationAsync();
             }
+
+            var urlAfterWait = _webView.Source?.ToString() ?? string.Empty;
+            if (!IsBoothLibraryUrl(urlAfterWait))
+            {
+                _statusLabel.Text = "BOOTHライブラリにアクセスできませんでした。ログインが必要です。";
+                return;
+            }
+
+            // ページ読み込み完了後、サーバに過度な負荷をかけないよう待機する（間隔の最低保証）
+            await Task.Delay(2000);
+
+            _statusLabel.Text = $"BOOTHライブラリ {page}ページ目を抽出中...";
+            var rawJson = await _webView.CoreWebView2.ExecuteScriptAsync(LibraryExtractionScript);
 
             var outputPath = string.IsNullOrWhiteSpace(_options.OutputPath)
                 ? Path.Combine(_options.LogDirectory, "booth-library.database.json")
                 : _options.OutputPath;
 
-            var finalDocument = new
-            {
-                SchemaVersion = "1",
-                SyncedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                SourceUrl = LibraryUrl,
-                Products = allProducts
-            };
-
-            var formatted = JsonSerializer.Serialize(finalDocument, new JsonSerializerOptions
+            using var document = JsonDocument.Parse(rawJson);
+            var formatted = JsonSerializer.Serialize(document.RootElement, new JsonSerializerOptions
             {
                 WriteIndented = true
             });
 
             await File.WriteAllTextAsync(outputPath, formatted);
 
-            var rawLogPath = Path.Combine(_options.LogDirectory, "last-library-sync.raw.json");
-            await File.WriteAllTextAsync(rawLogPath, formatted);
+            await File.WriteAllTextAsync(Path.Combine(_options.LogDirectory, "last-library-sync.raw.json"), formatted);
+            await SaveCurrentHtmlAsync($"last-library-page-{page:D3}-html.json.txt", showStatus: false);
 
-            _statusLabel.Text = $"同期データを保存しました: {allProducts.Count}件 / {outputPath}";
+            var count = document.RootElement.TryGetProperty("Products", out var products) && products.ValueKind == JsonValueKind.Array
+                ? products.GetArrayLength()
+                : 0;
+
+            _statusLabel.Text = $"同期データを保存しました: {count}件 / ページ{page}";
 
             if (_options.ExitAfterSync)
             {
-                await Task.Delay(1200);
+                await Task.Delay(1000);
                 BeginInvoke(Close);
             }
         }
@@ -379,7 +335,7 @@ internal sealed class BrowserForm : Form
 
     private async Task SyncLibraryAsync(bool manual)
     {
-        await SyncAllLibraryPagesAsync();
+        await SyncSingleLibraryPageAsync();
     }
 
     private static bool IsBoothLibraryUrl(string url)
@@ -617,6 +573,7 @@ internal sealed class HostOptions
     public bool SyncLibrary { get; private init; }
     public bool ExitAfterSync { get; private init; }
     public bool Headless { get; private init; }
+    public int Page { get; private init; } = 1;
 
     public static HostOptions Parse(string[] args)
     {
@@ -637,6 +594,12 @@ internal sealed class HostOptions
                     break;
                 case "--headless":
                     options = options.WithHeadless();
+                    break;
+                case "--page":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out var pageNumber) && pageNumber >= 1)
+                    {
+                        options = options.WithPage(pageNumber);
+                    }
                     break;
                 case "--profile":
                 case "--logs":
@@ -669,6 +632,7 @@ internal sealed class HostOptions
     private HostOptions WithSyncLibrary() => Copy(syncLibrary: true);
     private HostOptions WithExitAfterSync() => Copy(exitAfterSync: true);
     private HostOptions WithHeadless() => Copy(headless: true);
+    private HostOptions WithPage(int value) => Copy(page: value);
 
     private HostOptions Copy(
         string? profileDirectory = null,
@@ -678,7 +642,8 @@ internal sealed class HostOptions
         string? outputPath = null,
         bool? syncLibrary = null,
         bool? exitAfterSync = null,
-        bool? headless = null) => new()
+        bool? headless = null,
+        int? page = null) => new()
     {
         ProfileDirectory = profileDirectory ?? ProfileDirectory,
         LogDirectory = logDirectory ?? LogDirectory,
@@ -687,7 +652,8 @@ internal sealed class HostOptions
         OutputPath = outputPath ?? OutputPath,
         SyncLibrary = syncLibrary ?? SyncLibrary,
         ExitAfterSync = exitAfterSync ?? ExitAfterSync,
-        Headless = headless ?? Headless
+        Headless = headless ?? Headless,
+        Page = page ?? Page
     };
 }
 
