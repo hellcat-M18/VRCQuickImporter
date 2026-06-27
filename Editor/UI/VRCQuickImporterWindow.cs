@@ -109,7 +109,7 @@ namespace VRCQuickImporter.Editor.UI
                 BoothLibraryStore.TryGetPageState(out _currentMaxPage, out _reachedLastPage);
             }
 
-            var products = BoothLibraryStore.LoadProductsOrMock(out var storeStatus);
+            var products = BoothLibraryStore.LoadProducts(out var storeStatus, out var dataState);
 
             var headerRow = new VisualElement();
             headerRow.style.flexDirection = FlexDirection.Row;
@@ -141,24 +141,22 @@ namespace VRCQuickImporter.Editor.UI
 
             section.Add(headerRow);
 
-            var notice = new HelpBox(BuildLibraryStatusText(products.Count, storeStatus), BoothLibraryStore.HasDatabase ? HelpBoxMessageType.Info : HelpBoxMessageType.Warning);
-            notice.style.marginTop = 6;
-            section.Add(notice);
+            section.Add(BuildLibraryStatePanel(products.Count, storeStatus, dataState));
 
             section.Add(VRCQuickImporterTheme.Spacer(8));
 
-            section.Add(BuildProductGrid(products));
+            section.Add(BuildProductGrid(products, dataState));
 
-            section.Add(BuildLoadMoreButton());
+            section.Add(BuildLoadMoreButton(dataState));
 
             return section;
         }
 
-        private VisualElement BuildLoadMoreButton()
+        private VisualElement BuildLoadMoreButton(BoothLibraryDataState dataState)
         {
             var wrap = new VisualElement();
-            wrap.style.flexDirection = FlexDirection.Row;
-            wrap.style.justifyContent = Justify.Center;
+            wrap.style.flexDirection = FlexDirection.Column;
+            wrap.style.alignItems = Align.Center;
             wrap.style.marginTop = 12;
             wrap.style.marginBottom = 4;
 
@@ -168,13 +166,216 @@ namespace VRCQuickImporter.Editor.UI
                 text = _librarySyncInProgress ? "取得中..." : "もっと読み込む",
                 name = "load-more-button"
             };
-            loadMoreButton.SetEnabled(!_librarySyncInProgress && BoothLibraryStore.HasDatabase && !_reachedLastPage);
+            loadMoreButton.SetEnabled(!_librarySyncInProgress && dataState == BoothLibraryDataState.Ready && !_reachedLastPage);
             loadMoreButton.tooltip = _reachedLastPage
                 ? "これ以降ページはありません。"
-                : "BOOTHライブラリの「次のページ（" + nextMaxPage + "ページ目）」を読み込みます。";
+                : dataState != BoothLibraryDataState.Ready
+                    ? "まずBOOTHライブラリを同期してください。"
+                    : "BOOTHライブラリの「次のページ（" + nextMaxPage + "ページ目）」を読み込みます。";
             wrap.Add(loadMoreButton);
 
+            var caption = new Label(BuildLoadMoreCaption(dataState, nextMaxPage)) { name = "load-more-caption" };
+            BoothFontProvider.Apply(caption, FontStyle.Normal);
+            caption.style.marginTop = VRCQuickImporterTheme.SpaceXs;
+            caption.style.fontSize = VRCQuickImporterTheme.FontCaption;
+            caption.style.color = VRCQuickImporterTheme.TextFaint;
+            caption.style.unityTextAlign = TextAnchor.MiddleCenter;
+            wrap.Add(caption);
+
             return wrap;
+        }
+
+        private string BuildLoadMoreCaption(BoothLibraryDataState dataState, int nextMaxPage)
+        {
+            if (_librarySyncInProgress) return "取得完了までお待ちください。";
+            if (dataState == BoothLibraryDataState.MissingDatabase) return "まず「BOOTHと同期」で1ページ目を取得してください。";
+            if (dataState == BoothLibraryDataState.Empty) return "取得済みデータに商品がないため、追加読み込みはできません。";
+            if (dataState == BoothLibraryDataState.Error) return "データ読み込みエラーを解消してから再試行してください。";
+            if (_reachedLastPage) return "これ以降のページはありません。";
+            return "次はページ" + nextMaxPage + "を取得します。";
+        }
+
+        private VisualElement BuildLibraryStatePanel(int productCount, string storeStatus, BoothLibraryDataState dataState)
+        {
+            var shell = VRCQuickImporterTheme.MakeShell(VRCQuickImporterTheme.RadiusCardOuter, VRCQuickImporterTheme.SpaceXs);
+            shell.name = "library-state-panel";
+            shell.style.marginTop = 8;
+            shell.style.marginBottom = 0;
+
+            var core = VRCQuickImporterTheme.MakeCore(VRCQuickImporterTheme.RadiusCardInner, VRCQuickImporterTheme.SpaceLg);
+            core.style.flexDirection = FlexDirection.Row;
+            core.style.alignItems = Align.Center;
+            shell.Add(core);
+
+            var accent = new VisualElement();
+            accent.style.width = 4;
+            accent.style.height = 54;
+            accent.style.flexShrink = 0;
+            accent.style.backgroundColor = GetLibraryStateAccent(dataState);
+            VRCQuickImporterTheme.SetBorderRadius(accent, 4);
+            core.Add(accent);
+
+            var textColumn = new VisualElement();
+            textColumn.style.flexGrow = 1;
+            textColumn.style.marginLeft = VRCQuickImporterTheme.SpaceLg;
+            core.Add(textColumn);
+
+            var eyebrow = new Label(GetLibraryStateEyebrow(dataState));
+            BoothFontProvider.Apply(eyebrow, FontStyle.Bold);
+            eyebrow.style.fontSize = 9;
+            eyebrow.style.color = GetLibraryStateAccent(dataState);
+            textColumn.Add(eyebrow);
+
+            var title = new Label(GetLibraryStateTitle(dataState));
+            BoothFontProvider.Apply(title, FontStyle.Bold);
+            title.style.fontSize = VRCQuickImporterTheme.FontSection;
+            title.style.color = VRCQuickImporterTheme.TextPrimary;
+            title.style.marginTop = 1;
+            textColumn.Add(title);
+
+            var body = new Label(BuildLibraryStatusText(productCount, storeStatus));
+            BoothFontProvider.Apply(body, FontStyle.Normal);
+            body.style.fontSize = VRCQuickImporterTheme.FontBody;
+            body.style.color = VRCQuickImporterTheme.TextMuted;
+            body.style.whiteSpace = WhiteSpace.Normal;
+            body.style.marginTop = VRCQuickImporterTheme.SpaceXs;
+            textColumn.Add(body);
+
+            var meta = new VisualElement();
+            meta.style.flexDirection = FlexDirection.Row;
+            meta.style.flexWrap = Wrap.Wrap;
+            meta.style.justifyContent = Justify.FlexEnd;
+            meta.style.marginLeft = VRCQuickImporterTheme.SpaceLg;
+            meta.style.flexShrink = 0;
+            meta.Add(MakeStateChip(productCount + "件"));
+            if (_currentMaxPage > 0)
+            {
+                meta.Add(MakeStateChip("ページ" + _currentMaxPage));
+            }
+            if (_reachedLastPage)
+            {
+                meta.Add(MakeStateChip("全件取得済み"));
+            }
+            core.Add(meta);
+
+            return shell;
+        }
+
+        private VisualElement BuildGridStateBlock(BoothLibraryDataState dataState)
+        {
+            var shell = VRCQuickImporterTheme.MakeShell(VRCQuickImporterTheme.RadiusCardOuter, VRCQuickImporterTheme.SpaceSm);
+            shell.style.minHeight = 220;
+            shell.style.alignSelf = Align.Stretch;
+
+            var core = VRCQuickImporterTheme.MakeCore(VRCQuickImporterTheme.RadiusCardInner, VRCQuickImporterTheme.SpaceXl);
+            core.style.minHeight = 208;
+            core.style.alignItems = Align.Center;
+            core.style.justifyContent = Justify.Center;
+            shell.Add(core);
+
+            var badge = MakeStateChip(GetGridStateBadge(dataState));
+            badge.style.marginBottom = VRCQuickImporterTheme.SpaceMd;
+            core.Add(badge);
+
+            var title = new Label(GetGridStateTitle(dataState));
+            BoothFontProvider.Apply(title, FontStyle.Bold);
+            title.style.fontSize = 16;
+            title.style.color = VRCQuickImporterTheme.TextPrimary;
+            title.style.unityTextAlign = TextAnchor.MiddleCenter;
+            core.Add(title);
+
+            var body = new Label(GetGridStateBody(dataState));
+            BoothFontProvider.Apply(body, FontStyle.Normal);
+            body.style.fontSize = VRCQuickImporterTheme.FontBody;
+            body.style.color = VRCQuickImporterTheme.TextMuted;
+            body.style.whiteSpace = WhiteSpace.Normal;
+            body.style.unityTextAlign = TextAnchor.MiddleCenter;
+            body.style.marginTop = VRCQuickImporterTheme.SpaceSm;
+            body.style.maxWidth = 520;
+            core.Add(body);
+
+            return shell;
+        }
+
+        private Label MakeStateChip(string text)
+        {
+            var chip = new Label(text);
+            BoothFontProvider.Apply(chip, FontStyle.Bold);
+            chip.style.backgroundColor = VRCQuickImporterTheme.ChipBg;
+            chip.style.color = VRCQuickImporterTheme.TextMuted;
+            chip.style.fontSize = VRCQuickImporterTheme.FontCaption;
+            chip.style.paddingTop = 2;
+            chip.style.paddingBottom = 2;
+            chip.style.paddingLeft = VRCQuickImporterTheme.SpaceSm;
+            chip.style.paddingRight = VRCQuickImporterTheme.SpaceSm;
+            chip.style.marginLeft = VRCQuickImporterTheme.SpaceXs;
+            chip.style.marginBottom = VRCQuickImporterTheme.SpaceXs;
+            VRCQuickImporterTheme.SetBorderRadius(chip, VRCQuickImporterTheme.RadiusChip);
+            return chip;
+        }
+
+        private Color GetLibraryStateAccent(BoothLibraryDataState dataState)
+        {
+            if (_librarySyncInProgress) return VRCQuickImporterTheme.Accent;
+            if (IsLibraryProblemState(dataState)) return VRCQuickImporterTheme.Price;
+            if (_reachedLastPage) return VRCQuickImporterTheme.Like;
+            return VRCQuickImporterTheme.Accent;
+        }
+
+        private string GetLibraryStateEyebrow(BoothLibraryDataState dataState)
+        {
+            if (_librarySyncInProgress) return _librarySyncWaitingForRateLimit ? "WAITING" : "SYNCING";
+            if (dataState == BoothLibraryDataState.MissingDatabase) return "GET STARTED";
+            if (dataState == BoothLibraryDataState.Empty) return "EMPTY";
+            if (dataState == BoothLibraryDataState.Error) return "ERROR";
+            return _reachedLastPage ? "COMPLETE" : "READY";
+        }
+
+        private string GetLibraryStateTitle(BoothLibraryDataState dataState)
+        {
+            if (_librarySyncInProgress) return _librarySyncWaitingForRateLimit ? "BOOTHアクセス間隔を調整中" : "BOOTHライブラリを取得中";
+            if (dataState == BoothLibraryDataState.MissingDatabase) return "まだ同期していません";
+            if (dataState == BoothLibraryDataState.Empty) return "同期済みですが商品が見つかりません";
+            if (dataState == BoothLibraryDataState.Error) return "ライブラリデータの確認が必要です";
+            return _reachedLastPage ? "全件取得済み" : "同期済みライブラリ";
+        }
+
+        private bool IsLibraryProblemState(BoothLibraryDataState dataState)
+        {
+            if (dataState == BoothLibraryDataState.MissingDatabase || dataState == BoothLibraryDataState.Empty || dataState == BoothLibraryDataState.Error)
+            {
+                return true;
+            }
+
+            if (string.IsNullOrEmpty(_libraryStatusOverride)) return false;
+            return _libraryStatusOverride.Contains("失敗")
+                || _libraryStatusOverride.Contains("タイムアウト")
+                || _libraryStatusOverride.Contains("終了しました")
+                || _libraryStatusOverride.Contains("確認できません");
+        }
+
+        private string GetGridStateBadge(BoothLibraryDataState dataState)
+        {
+            if (_librarySyncInProgress) return "取得中";
+            if (dataState == BoothLibraryDataState.Error) return "エラー";
+            if (dataState == BoothLibraryDataState.Empty) return "0件";
+            return "未同期";
+        }
+
+        private string GetGridStateTitle(BoothLibraryDataState dataState)
+        {
+            if (_librarySyncInProgress) return "ライブラリを読み込んでいます";
+            if (dataState == BoothLibraryDataState.Error) return "商品一覧を表示できません";
+            if (dataState == BoothLibraryDataState.Empty) return "表示できる商品がありません";
+            return "BOOTHライブラリを同期してください";
+        }
+
+        private string GetGridStateBody(BoothLibraryDataState dataState)
+        {
+            if (_librarySyncInProgress) return "WebView2 helperがBOOTHの購入履歴ページを取得しています。完了するとここにカードが表示されます。";
+            if (dataState == BoothLibraryDataState.Error) return "database.json の読み込みに失敗しました。詳細設定からデータフォルダを開き、必要に応じて再同期してください。";
+            if (dataState == BoothLibraryDataState.Empty) return "BOOTH側で購入履歴が見つからない、またはログイン状態が切れている可能性があります。同期ウインドウを表示して再実行すると確認しやすいです。";
+            return "右上の「BOOTHと同期」から1ページ目を取得します。BOOTHアクセスは明示操作ごとに行われ、自動巡回はしません。";
         }
 
         private string BuildLibraryStatusText(int productCount, string storeStatus)
@@ -197,7 +398,7 @@ namespace VRCQuickImporter.Editor.UI
             return string.Join("\n", lines);
         }
 
-        private VisualElement BuildProductGrid(List<BoothProduct> products)
+        private VisualElement BuildProductGrid(List<BoothProduct> products, BoothLibraryDataState dataState)
         {
             // UI ToolkitのWrap任せだと折り返し境界で余白が不自然になりやすいため、
             // 列数とカード幅をこちらで決め、行単位で明示的に配置する。
@@ -210,6 +411,12 @@ namespace VRCQuickImporter.Editor.UI
             grid.style.alignSelf = Align.Stretch;
             grid.style.flexGrow = 1;
             VRCQuickImporterTheme.SetBorderRadius(grid, VRCQuickImporterTheme.RadiusImage);
+
+            if (products == null || products.Count == 0)
+            {
+                grid.Add(BuildGridStateBlock(dataState));
+                return grid;
+            }
 
             grid.userData = new ProductGridState(products);
             grid.RegisterCallback<GeometryChangedEvent>(_ => RebuildProductGridRows(grid));
@@ -692,7 +899,7 @@ namespace VRCQuickImporter.Editor.UI
         private void AppendNewProducts()
         {
             // データベースから最新の商品リストを取得
-            var products = BoothLibraryStore.LoadProductsOrMock(out var storeStatus);
+            var products = BoothLibraryStore.LoadProducts(out var storeStatus, out var dataState);
 
             // ボタン状態を更新
             var syncBtn = rootVisualElement.Q<Button>("sync-button");
@@ -706,10 +913,27 @@ namespace VRCQuickImporter.Editor.UI
             if (loadMoreBtn != null)
             {
                 loadMoreBtn.text = "もっと読み込む";
-                loadMoreBtn.SetEnabled(BoothLibraryStore.HasDatabase && !_reachedLastPage);
+                loadMoreBtn.SetEnabled(dataState == BoothLibraryDataState.Ready && !_reachedLastPage);
                 loadMoreBtn.tooltip = _reachedLastPage
                     ? "これ以降ページはありません。"
-                    : "BOOTHライブラリの「次のページ（" + (Mathf.Max(1, _currentMaxPage) + 1) + "ページ目）」を読み込みます。";
+                    : dataState != BoothLibraryDataState.Ready
+                        ? "まずBOOTHライブラリを同期してください。"
+                        : "BOOTHライブラリの「次のページ（" + (Mathf.Max(1, _currentMaxPage) + 1) + "ページ目）」を読み込みます。";
+            }
+
+            var loadMoreCaption = rootVisualElement.Q<Label>("load-more-caption");
+            if (loadMoreCaption != null)
+            {
+                loadMoreCaption.text = BuildLoadMoreCaption(dataState, Mathf.Max(1, _currentMaxPage) + 1);
+            }
+
+            var statePanel = rootVisualElement.Q<VisualElement>("library-state-panel");
+            if (statePanel?.parent != null)
+            {
+                var parent = statePanel.parent;
+                var indexInParent = parent.IndexOf(statePanel);
+                parent.Remove(statePanel);
+                parent.Insert(indexInParent, BuildLibraryStatePanel(products.Count, storeStatus, dataState));
             }
 
             // グリッドに新商品をappend
