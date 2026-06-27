@@ -876,7 +876,8 @@ namespace VRCQuickImporter.Editor.UI
             }
 
             var newProducts = products.GetRange(oldCount, products.Count - oldCount);
-            state.Products = products;
+            state.Products.Clear();
+            state.Products.AddRange(products);
 
             var availableWidth = grid.resolvedStyle.width - GridPadding * 2;
             if (availableWidth <= 0)
@@ -925,11 +926,7 @@ namespace VRCQuickImporter.Editor.UI
                 }
             }
 
-            // サムネイル取得をトリガー
-            foreach (var product in newProducts)
-            {
-                BoothThumbnailCache.GetOrRequest(product.ThumbnailUrl);
-            }
+            // サムネイルは BuildProductCard 内で取得される
         }
 
         private void RefreshWindow()
