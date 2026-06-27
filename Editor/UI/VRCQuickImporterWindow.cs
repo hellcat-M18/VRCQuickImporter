@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -40,7 +39,6 @@ namespace VRCQuickImporter.Editor.UI
         private const int PreferredCardWidth = 228;
         private const int MinCardWidth = 190;
         private const int MaxCardWidth = 270;
-        private const int CardPadding = 8;
         private const int CardSpacing = 10;
         private const int GridPadding = 10;
 
@@ -66,7 +64,7 @@ namespace VRCQuickImporter.Editor.UI
             OnImportRequested = OnImportButtonClicked;
 
             var root = rootVisualElement;
-            ApplyDefaultFont(root);
+            BoothFontProvider.ApplyToRoot(root);
             root.style.paddingLeft = 14;
             root.style.paddingRight = 14;
             root.style.paddingTop = 14;
@@ -89,7 +87,7 @@ namespace VRCQuickImporter.Editor.UI
             var wrap = new VisualElement();
 
             var title = new Label("VRCQuickImporter");
-            ApplyFont(title, FontStyle.Bold);
+            BoothFontProvider.Apply(title, FontStyle.Bold);
             title.style.fontSize = 20;
             wrap.Add(title);
 
@@ -117,7 +115,7 @@ namespace VRCQuickImporter.Editor.UI
             headerRow.style.flexDirection = FlexDirection.Row;
 
             var heading = new Label("BOOTHライブラリ");
-            ApplyFont(heading, FontStyle.Bold);
+            BoothFontProvider.Apply(heading, FontStyle.Bold);
             heading.style.fontSize = 15;
             heading.style.flexGrow = 1;
             heading.style.alignSelf = Align.Center;
@@ -147,7 +145,7 @@ namespace VRCQuickImporter.Editor.UI
             notice.style.marginTop = 6;
             section.Add(notice);
 
-            section.Add(Spacer(8));
+            section.Add(VRCQuickImporterTheme.Spacer(8));
 
             section.Add(BuildProductGrid(products));
 
@@ -204,14 +202,14 @@ namespace VRCQuickImporter.Editor.UI
             // UI ToolkitのWrap任せだと折り返し境界で余白が不自然になりやすいため、
             // 列数とカード幅をこちらで決め、行単位で明示的に配置する。
             var grid = new VisualElement { name = "product-grid" };
-            grid.style.backgroundColor = GridBackgroundColor;
+            grid.style.backgroundColor = VRCQuickImporterTheme.GridSurface;
             grid.style.paddingTop = GridPadding;
             grid.style.paddingBottom = GridPadding;
             grid.style.paddingLeft = GridPadding;
             grid.style.paddingRight = GridPadding;
             grid.style.alignSelf = Align.Stretch;
             grid.style.flexGrow = 1;
-            SetBorderRadius(grid, 8);
+            VRCQuickImporterTheme.SetBorderRadius(grid, VRCQuickImporterTheme.RadiusImage);
 
             grid.userData = new ProductGridState(products);
             grid.RegisterCallback<GeometryChangedEvent>(_ => RebuildProductGridRows(grid));
@@ -257,8 +255,8 @@ namespace VRCQuickImporter.Editor.UI
 
                 for (var column = 0; column < layout.ColumnCount && index < state.Products.Count; column++, index++)
                 {
-                    var card = BuildProductCard(state.Products[index]);
-                    ApplyCardSize(card, layout.CardWidth);
+                    var card = ProductCard.Build(state.Products[index], (p, f) => OnImportRequested?.Invoke(p, f), OpenProductPage);
+                    ProductCard.ApplyCardWidth(card, layout.CardWidth);
                     card.style.marginRight = column == layout.ColumnCount - 1 ? 0 : CardSpacing;
                     row.Add(card);
                 }
@@ -324,238 +322,6 @@ namespace VRCQuickImporter.Editor.UI
             return new ProductGridLayout(bestColumns, bestWidth);
         }
 
-        private static void ApplyCardSize(VisualElement card, float cardWidth)
-        {
-            card.style.width = cardWidth;
-            var thumbnail = card.Q<VisualElement>("thumbnail");
-            if (thumbnail == null)
-            {
-                return;
-            }
-
-            var thumbnailSize = Mathf.Max(1, cardWidth - CardPadding * 2);
-            thumbnail.style.width = thumbnailSize;
-            thumbnail.style.height = thumbnailSize;
-        }
-
-        private VisualElement BuildProductCard(BoothProduct product)
-        {
-            var card = new VisualElement();
-            card.style.width = PreferredCardWidth;
-            card.style.marginRight = CardSpacing;
-            card.style.marginBottom = CardSpacing;
-            card.style.paddingTop = CardPadding;
-            card.style.paddingBottom = CardPadding;
-            card.style.paddingLeft = CardPadding;
-            card.style.paddingRight = CardPadding;
-            card.style.backgroundColor = CardBackgroundColor;
-            SetBorderRadius(card, 8);
-
-            card.Add(BuildThumbnail(product));
-
-            var body = new VisualElement();
-            body.style.marginTop = 6;
-
-            body.Add(BuildNameLabel(product));
-
-            var shopName = SanitizeDisplayText(NormalizeOptionalLabel(product.ShopName));
-            if (!string.IsNullOrEmpty(shopName) && shopName != SanitizeDisplayText(NormalizeOptionalLabel(product.Name)))
-            {
-                var shopLabel = new Label(shopName);
-                shopLabel.tooltip = shopName;
-                shopLabel.style.color = MutedTextColor;
-                shopLabel.style.fontSize = 11;
-                shopLabel.style.marginTop = 2;
-                shopLabel.style.whiteSpace = WhiteSpace.Normal;
-                shopLabel.style.maxHeight = 32;
-                shopLabel.style.overflow = Overflow.Hidden;
-                body.Add(shopLabel);
-            }
-
-            var priceLikeRow = BuildPriceLikeRow(product);
-            if (priceLikeRow != null)
-            {
-                body.Add(priceLikeRow);
-                body.Add(Spacer(4));
-            }
-            body.Add(BuildFileRow(product));
-
-            card.Add(body);
-            return card;
-        }
-
-        private static VisualElement BuildThumbnail(BoothProduct product)
-        {
-            var thumbWrap = new VisualElement();
-            thumbWrap.name = "thumbnail";
-            thumbWrap.style.width = PreferredCardWidth - CardPadding * 2;
-            thumbWrap.style.height = PreferredCardWidth - CardPadding * 2;
-            thumbWrap.style.backgroundColor = ThumbnailBackgroundColor;
-            thumbWrap.style.position = Position.Relative;
-            thumbWrap.style.overflow = Overflow.Hidden;
-            SetBorderRadius(thumbWrap, 6);
-
-            var placeholder = new Label("サムネ");
-            placeholder.style.unityTextAlign = TextAnchor.MiddleCenter;
-            placeholder.style.color = ThumbnailTextColor;
-            placeholder.style.fontSize = 12;
-            placeholder.style.position = Position.Absolute;
-            placeholder.style.left = 0;
-            placeholder.style.top = 0;
-            placeholder.style.right = 0;
-            placeholder.style.bottom = 0;
-            thumbWrap.Add(placeholder);
-
-            var image = new Image();
-            image.scaleMode = ScaleMode.ScaleAndCrop;
-            image.style.position = Position.Absolute;
-            image.style.left = 0;
-            image.style.top = 0;
-            image.style.right = 0;
-            image.style.bottom = 0;
-            image.style.opacity = 0;
-            thumbWrap.Add(image);
-
-            BoothThumbnailCache.GetTexture(product.ThumbnailUrl, texture =>
-            {
-                if (texture == null || thumbWrap == null)
-                {
-                    return;
-                }
-
-                image.image = texture;
-                image.userData = texture;
-                image.style.opacity = 1;
-                placeholder.style.display = DisplayStyle.None;
-            });
-
-            // カテゴリ/バッジをサムネ上にオーバーレイ（BOOTHスキリスト風）
-            var badgeRow = new VisualElement();
-            badgeRow.style.position = Position.Absolute;
-            badgeRow.style.left = 6;
-            badgeRow.style.right = 6;
-            badgeRow.style.top = 6;
-            badgeRow.style.flexDirection = FlexDirection.Row;
-            badgeRow.style.justifyContent = Justify.SpaceBetween;
-
-            var categoryLabel = NormalizeCategoryLabel(product.CategoryLabel, product);
-            if (!string.IsNullOrEmpty(categoryLabel))
-            {
-                badgeRow.Add(MakePill(categoryLabel, CategoryPillBgColor, CategoryPillTextColor, bold: false));
-            }
-
-            var badgeText = NormalizeBadgeText(product.BadgeText);
-            if (!string.IsNullOrEmpty(badgeText))
-            {
-                badgeRow.Add(MakePill(badgeText, VrchatBadgeBgColor, Color.white, bold: true));
-            }
-
-            thumbWrap.Add(badgeRow);
-            return thumbWrap;
-        }
-
-        private static VisualElement MakePill(string text, Color bg, Color fg, bool bold)
-        {
-            var pill = new Label(text);
-            pill.tooltip = text;
-            ApplyFont(pill, bold ? FontStyle.Bold : FontStyle.Normal);
-            pill.style.backgroundColor = bg;
-            pill.style.color = fg;
-            pill.style.fontSize = 10;
-            pill.style.paddingLeft = 6;
-            pill.style.paddingRight = 6;
-            pill.style.paddingTop = 2;
-            pill.style.paddingBottom = 2;
-            SetBorderRadius(pill, 4);
-            return pill;
-        }
-
-        private static VisualElement BuildNameLabel(BoothProduct product)
-        {
-            var name = SanitizeDisplayText(string.IsNullOrEmpty(product.Name) ? "(商品名なし)" : product.Name);
-            var nameLabel = new Label(name);
-            nameLabel.tooltip = name;
-            ApplyFont(nameLabel, FontStyle.Bold);
-            nameLabel.style.fontSize = 13;
-            nameLabel.style.whiteSpace = WhiteSpace.Normal;
-            nameLabel.style.maxHeight = 52;
-            nameLabel.style.overflow = Overflow.Hidden;
-            return nameLabel;
-        }
-
-        private static VisualElement BuildPriceLikeRow(BoothProduct product)
-        {
-            var hasPrice = !string.IsNullOrEmpty(NormalizePriceText(product.PriceText));
-            var hasLike = product.LikeCount > 0;
-            if (!hasPrice && !hasLike)
-            {
-                return null;
-            }
-
-            var row = new VisualElement();
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.marginTop = 4;
-
-            var priceLabel = new Label(hasPrice ? NormalizePriceText(product.PriceText) : string.Empty);
-            priceLabel.style.color = PriceColor;
-            ApplyFont(priceLabel, FontStyle.Bold);
-            priceLabel.style.fontSize = 13;
-            priceLabel.style.flexGrow = 1;
-            row.Add(priceLabel);
-
-            if (hasLike)
-            {
-                var likeLabel = new Label("♥ " + product.LikeCount.ToString("N0"));
-                likeLabel.style.color = LikeColor;
-                likeLabel.style.fontSize = 11;
-                likeLabel.style.alignSelf = Align.FlexEnd;
-                row.Add(likeLabel);
-            }
-
-            return row;
-        }
-
-        private VisualElement BuildFileRow(BoothProduct product)
-        {
-            var row = new VisualElement();
-
-            var files = product.Files ?? new List<BoothDownloadFile>();
-
-            if (files.Count == 0)
-            {
-                var none = new Label("ダウンロード可能なファイルがありません");
-                none.style.color = MutedTextColor;
-                none.style.fontSize = 11;
-                none.style.whiteSpace = WhiteSpace.Normal;
-                row.Add(none);
-                return row;
-            }
-
-            var choices = new List<string>(files.Count);
-            foreach (var file in files)
-            {
-                choices.Add(TruncateForCard(file.DisplayName, 34));
-            }
-
-            var popup = new PopupField<string>(choices, 0);
-            popup.tooltip = files.Count > 0 ? SanitizeDisplayText(files[0].DisplayName) : string.Empty;
-            popup.style.marginBottom = 4;
-            row.Add(popup);
-
-            var importButton = new Button(() => OnImportRequested?.Invoke(product, files[popup.index]))
-            {
-                text = "ダウンロード＆インポート"
-            };
-            var hasUrl = files.Count > 0 && !string.IsNullOrEmpty(files[0].DownloadUrl);
-            importButton.SetEnabled(hasUrl);
-            importButton.tooltip = hasUrl
-                ? "選択したファイルをダウンロードしてUnityへインポートします"
-                : "このファイルのダウンロードURLが未取得です。再度ライブラリを同期してください。";
-            row.Add(importButton);
-
-            return row;
-        }
-
         private VisualElement BuildAdvancedSection()
         {
             var foldout = new Foldout
@@ -584,7 +350,7 @@ namespace VRCQuickImporter.Editor.UI
             section.style.marginTop = 6;
 
             var heading = new Label("BOOTHログイン / Helper");
-            ApplyFont(heading, FontStyle.Bold);
+            BoothFontProvider.Apply(heading, FontStyle.Bold);
             heading.style.fontSize = 15;
             section.Add(heading);
 
@@ -610,16 +376,16 @@ namespace VRCQuickImporter.Editor.UI
             section.style.marginTop = 14;
 
             var heading = new Label("データ / 設定");
-            ApplyFont(heading, FontStyle.Bold);
+            BoothFontProvider.Apply(heading, FontStyle.Bold);
             heading.style.fontSize = 15;
             section.Add(heading);
 
-            section.Add(Spacer(4));
+            section.Add(VRCQuickImporterTheme.Spacer(4));
             section.Add(MakePathRow("データ保存先", VRCQuickImporterPaths.DataRoot));
             section.Add(MakePathRow("ログイン用プロファイル", VRCQuickImporterPaths.WebViewProfileDirectory));
             section.Add(MakePathRow("ログ", VRCQuickImporterPaths.LogsDirectory));
 
-            section.Add(Spacer(8));
+            section.Add(VRCQuickImporterTheme.Spacer(8));
 
             var openDataButton = new Button(() => EditorUtility.RevealInFinder(VRCQuickImporterPaths.DataRoot))
             {
@@ -643,28 +409,13 @@ namespace VRCQuickImporter.Editor.UI
             row.style.marginBottom = 6;
 
             var labelElement = new Label(label);
-            ApplyFont(labelElement, FontStyle.Bold);
+            BoothFontProvider.Apply(labelElement, FontStyle.Bold);
             row.Add(labelElement);
 
             var pathElement = new TextField { value = path, isReadOnly = true };
             row.Add(pathElement);
 
             return row;
-        }
-
-        private static VisualElement Spacer(int height)
-        {
-            var spacer = new VisualElement();
-            spacer.style.height = height;
-            return spacer;
-        }
-
-        private static void SetBorderRadius(VisualElement el, float radius)
-        {
-            el.style.borderTopLeftRadius = radius;
-            el.style.borderTopRightRadius = radius;
-            el.style.borderBottomLeftRadius = radius;
-            el.style.borderBottomRightRadius = radius;
         }
 
         private void StartLibrarySync()
@@ -1003,8 +754,8 @@ namespace VRCQuickImporter.Editor.UI
             {
                 for (var col = cardsInLastRow; col < layout.ColumnCount && index < newProducts.Count; col++, index++)
                 {
-                    var card = BuildProductCard(newProducts[index]);
-                    ApplyCardSize(card, layout.CardWidth);
+                    var card = ProductCard.Build(newProducts[index], (p, f) => OnImportRequested?.Invoke(p, f), OpenProductPage);
+                    ProductCard.ApplyCardWidth(card, layout.CardWidth);
                     card.style.marginRight = col == layout.ColumnCount - 1 ? 0 : CardSpacing;
                     lastRow.Add(card);
                 }
@@ -1020,14 +771,14 @@ namespace VRCQuickImporter.Editor.UI
 
                 for (var col = 0; col < layout.ColumnCount && index < newProducts.Count; col++, index++)
                 {
-                    var card = BuildProductCard(newProducts[index]);
-                    ApplyCardSize(card, layout.CardWidth);
+                    var card = ProductCard.Build(newProducts[index], (p, f) => OnImportRequested?.Invoke(p, f), OpenProductPage);
+                    ProductCard.ApplyCardWidth(card, layout.CardWidth);
                     card.style.marginRight = col == layout.ColumnCount - 1 ? 0 : CardSpacing;
                     row.Add(card);
                 }
             }
 
-            // サムネイルは BuildProductCard 内で取得される
+            // サムネイルは ProductCard.Build 内で取得される
         }
 
         private void RefreshWindow()
@@ -1066,130 +817,19 @@ namespace VRCQuickImporter.Editor.UI
             BoothImportPipeline.StartImport(product, file);
         }
 
+        private static void OpenProductPage(BoothProduct product)
+        {
+            if (string.IsNullOrEmpty(product.ProductUrl))
+            {
+                return;
+            }
+
+            Application.OpenURL(product.ProductUrl);
+        }
+
         private void OnDisable()
         {
             EditorApplication.update -= PollLibrarySync;
-        }
-
-        private static string NormalizeOptionalLabel(string value)
-        {
-            return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
-        }
-
-        private static string NormalizeCategoryLabel(string value, BoothProduct product)
-        {
-            value = NormalizeOptionalLabel(value);
-            if (string.IsNullOrEmpty(value)) return string.Empty;
-            if (value.Length > 16) return string.Empty;
-            if (value == NormalizeOptionalLabel(product.Name)) return string.Empty;
-            if (value == NormalizeOptionalLabel(product.ShopName)) return string.Empty;
-            if (value.Contains(".")) return string.Empty;
-            return value;
-        }
-
-        private static string NormalizeBadgeText(string value)
-        {
-            value = NormalizeOptionalLabel(value);
-            if (string.IsNullOrEmpty(value)) return string.Empty;
-            if (value.Length > 12) return string.Empty;
-            return value;
-        }
-
-        private static string NormalizePriceText(string value)
-        {
-            value = NormalizeOptionalLabel(value);
-            if (string.IsNullOrEmpty(value)) return string.Empty;
-            if (value.Length > 24) return string.Empty;
-            if (value.Contains("¥") || value.Contains("￥") || value.Contains("無料")) return value;
-            return string.Empty;
-        }
-
-        private static string TruncateForCard(string value, int maxLength)
-        {
-            value = SanitizeDisplayText(NormalizeOptionalLabel(value));
-            if (value.Length <= maxLength) return value;
-            if (maxLength <= 1) return "…";
-            return value.Substring(0, maxLength - 1) + "…";
-        }
-
-        /// <summary>
-        /// Noto Sans JP をルートに適用し、子要素にも継承させる。
-        /// -unity-font-definition は -unity-font より優先されるため、
-        /// まず definition を None でクリアし、その後に unityFont を設定する。
-        /// </summary>
-        private static void ApplyDefaultFont(VisualElement element)
-        {
-            element.style.unityFontDefinition = StyleKeyword.None;
-            var font = BoothFontProvider.Resolve(FontStyle.Normal);
-            if (font != null)
-            {
-                element.style.unityFont = font;
-            }
-        }
-
-        /// <summary>
-        /// 要素にウエイトに応じたフォントを適用する。
-        /// BoldにはBold用フォントを直接割り当て、合成太字（二重太字）を避けるため
-        /// unityFontStyleAndWeight は Normal にする。
-        /// </summary>
-        private static void ApplyFont(VisualElement element, FontStyle style)
-        {
-            element.style.unityFontDefinition = StyleKeyword.None;
-            var font = BoothFontProvider.Resolve(style);
-            if (font != null)
-            {
-                element.style.unityFont = font;
-            }
-            element.style.unityFontStyleAndWeight = FontStyle.Normal;
-        }
-
-        /// <summary>
-        /// UI Toolkitで描画できない絵文字（カラー絵文字・制御文字）を取り除き、豆腐（□）を防ぐ。
-        /// BMP内の一般的な記号（★♪など）は保持する。
-        /// </summary>
-        private static string SanitizeDisplayText(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                return value;
-            }
-
-            var builder = new StringBuilder(value.Length);
-            for (var i = 0; i < value.Length; i++)
-            {
-                var ch = value[i];
-                var code = (int)ch;
-
-                // バリエーションセレクタ / ゼロ幅文字（単独では描画されない、絵文字表示制御用）
-                if (code == 0xFE0E || code == 0xFE0F || code == 0xFEFF) continue;
-                if (code >= 0x200B && code <= 0x200D) continue;
-
-                // サロゲートペア（第1面外の絵文字等）
-                if (char.IsHighSurrogate(ch) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
-                {
-                    var codePoint = char.ConvertToUtf32(ch, value[i + 1]);
-                    if (IsUnsupportedEmojiCodePoint(codePoint))
-                    {
-                        i++; // 下位サロゲートも読み飛ばす
-                        continue;
-                    }
-
-                    builder.Append(ch);
-                    builder.Append(value[i + 1]);
-                    i++;
-                    continue;
-                }
-
-                builder.Append(ch);
-            }
-
-            return builder.ToString();
-        }
-
-        private static bool IsUnsupportedEmojiCodePoint(int codePoint)
-        {
-            return (codePoint >= 0x1F1E6 && codePoint <= 0x1F1FF) // 国旗
-                || (codePoint >= 0x1F300 && codePoint <= 0x1FAFF); // 絵文字・ピクトグラム
         }
 
         private static void ClearWebViewProfile()
@@ -1222,38 +862,6 @@ namespace VRCQuickImporter.Editor.UI
             Directory.CreateDirectory(VRCQuickImporterPaths.WebViewProfileDirectory);
             Debug.Log("[VRCQuickImporter] ログイン用プロファイルを削除しました。");
         }
-
-        private static bool IsProSkin => EditorGUIUtility.isProSkin;
-
-        private static Color GridBackgroundColor => IsProSkin
-            ? new Color(0.16f, 0.16f, 0.16f, 1f)
-            : new Color(0.94f, 0.94f, 0.94f, 1f);
-
-        private static Color CardBackgroundColor => IsProSkin
-            ? new Color(0.23f, 0.23f, 0.23f, 1f)
-            : new Color(1f, 1f, 1f, 1f);
-
-        private static Color ThumbnailBackgroundColor => IsProSkin
-            ? new Color(0.13f, 0.13f, 0.13f, 1f)
-            : new Color(0.82f, 0.82f, 0.82f, 1f);
-
-        private static Color ThumbnailTextColor => IsProSkin
-            ? new Color(0.55f, 0.55f, 0.55f, 1f)
-            : new Color(0.45f, 0.45f, 0.45f, 1f);
-
-        private static Color MutedTextColor => IsProSkin
-            ? new Color(0.62f, 0.62f, 0.62f, 1f)
-            : new Color(0.35f, 0.35f, 0.35f, 1f);
-
-        private static Color PriceColor => new Color(0.83f, 0.07f, 0.24f, 1f);
-
-        private static Color LikeColor => new Color(0.83f, 0.12f, 0.30f, 1f);
-
-        private static Color CategoryPillBgColor => new Color(1f, 1f, 1f, 0.85f);
-
-        private static Color CategoryPillTextColor => new Color(0.2f, 0.2f, 0.2f, 1f);
-
-        private static Color VrchatBadgeBgColor => new Color(0.11f, 0.62f, 0.54f, 1f);
 
         private sealed class ProductGridState
         {
