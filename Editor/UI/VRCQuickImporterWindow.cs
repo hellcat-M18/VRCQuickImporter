@@ -122,7 +122,8 @@ namespace VRCQuickImporter.Editor.UI
 
             var syncButton = new Button(StartLibrarySync)
             {
-                text = _librarySyncInProgress ? "同期中..." : "BOOTHと同期"
+                text = _librarySyncInProgress ? "同期中..." : "BOOTHと同期",
+                name = "sync-button"
             };
             syncButton.SetEnabled(!_librarySyncInProgress);
             syncButton.tooltip = "BOOTHライブラリの1ページ目を再取得します（表示内容はリセットされます）。";
@@ -163,7 +164,8 @@ namespace VRCQuickImporter.Editor.UI
             var nextMaxPage = Mathf.Max(1, _currentMaxPage) + 1;
             var loadMoreButton = new Button(StartLoadMore)
             {
-                text = _librarySyncInProgress ? "取得中..." : "もっと読み込む"
+                text = _librarySyncInProgress ? "取得中..." : "もっと読み込む",
+                name = "load-more-button"
             };
             loadMoreButton.SetEnabled(!_librarySyncInProgress && BoothLibraryStore.HasDatabase && !_reachedLastPage);
             loadMoreButton.tooltip = _reachedLastPage
@@ -697,7 +699,28 @@ namespace VRCQuickImporter.Editor.UI
             _librarySyncInProgress = true;
             EditorApplication.update -= PollLibrarySync;
             EditorApplication.update += PollLibrarySync;
-            RefreshWindow();
+
+            // 「もっと読み込む」の場合は商品グリッドを維持し、ボタン状態だけ更新する
+            if (!replace)
+            {
+                var syncBtn = rootVisualElement.Q<Button>("sync-button");
+                if (syncBtn != null)
+                {
+                    syncBtn.text = "同期中...";
+                    syncBtn.SetEnabled(false);
+                }
+                var loadMoreBtn = rootVisualElement.Q<Button>("load-more-button");
+                if (loadMoreBtn != null)
+                {
+                    loadMoreBtn.text = "取得中...";
+                    loadMoreBtn.SetEnabled(false);
+                }
+            }
+            else
+            {
+                // ページ1再取得は全再構築
+                RefreshWindow();
+            }
         }
 
         private static bool ConfirmBoothAccess()
