@@ -148,6 +148,12 @@ namespace VRCQuickImporter.Editor.UI
 
             body.Add(BuildNameLabel(product));
 
+            var shopSlot = new VisualElement();
+            shopSlot.style.minHeight = VRCQuickImporterTheme.CardShopHeight;
+            shopSlot.style.maxHeight = VRCQuickImporterTheme.CardShopHeight;
+            shopSlot.style.marginTop = 2;
+            shopSlot.style.overflow = Overflow.Hidden;
+
             var shopName = BoothTextUtil.SanitizeDisplayText(BoothTextUtil.NormalizeOptionalLabel(product.ShopName));
             var productName = BoothTextUtil.SanitizeDisplayText(BoothTextUtil.NormalizeOptionalLabel(product.Name));
             if (!string.IsNullOrEmpty(shopName) && shopName != productName)
@@ -157,12 +163,11 @@ namespace VRCQuickImporter.Editor.UI
                 BoothFontProvider.Apply(shopLabel, FontStyle.Normal);
                 shopLabel.style.color = VRCQuickImporterTheme.TextMuted;
                 shopLabel.style.fontSize = VRCQuickImporterTheme.FontShop;
-                shopLabel.style.marginTop = 2;
                 shopLabel.style.whiteSpace = WhiteSpace.Normal;
-                shopLabel.style.maxHeight = 30;
                 shopLabel.style.overflow = Overflow.Hidden;
-                body.Add(shopLabel);
+                shopSlot.Add(shopLabel);
             }
+            body.Add(shopSlot);
 
             var metaRow = BuildMetaRow(product);
             if (metaRow != null)
@@ -191,7 +196,8 @@ namespace VRCQuickImporter.Editor.UI
             nameLabel.style.fontSize = VRCQuickImporterTheme.FontCardName;
             nameLabel.style.color = VRCQuickImporterTheme.TextPrimary;
             nameLabel.style.whiteSpace = WhiteSpace.Normal;
-            nameLabel.style.maxHeight = 52;
+            nameLabel.style.minHeight = VRCQuickImporterTheme.CardNameHeight;
+            nameLabel.style.maxHeight = VRCQuickImporterTheme.CardNameHeight;
             nameLabel.style.overflow = Overflow.Hidden;
             return nameLabel;
         }
