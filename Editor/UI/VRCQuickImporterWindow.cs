@@ -127,23 +127,6 @@ namespace VRCQuickImporter.Editor.UI
             VRCQuickImporterTheme.SetBorderRadius(button, VRCQuickImporterTheme.RadiusImage);
         }
 
-        private static void StyleSecondarySyncButton(Button button)
-        {
-            BoothFontProvider.Apply(button, FontStyle.Normal);
-            button.style.backgroundColor = VRCQuickImporterTheme.ChipBg;
-            button.style.color = VRCQuickImporterTheme.TextMuted;
-            button.style.borderTopWidth = 0;
-            button.style.borderRightWidth = 0;
-            button.style.borderBottomWidth = 0;
-            button.style.borderLeftWidth = 0;
-            button.style.marginLeft = VRCQuickImporterTheme.SpaceSm;
-            button.style.paddingLeft = VRCQuickImporterTheme.SpaceMd;
-            button.style.paddingRight = VRCQuickImporterTheme.SpaceMd;
-            button.style.paddingTop = VRCQuickImporterTheme.SpaceSm;
-            button.style.paddingBottom = VRCQuickImporterTheme.SpaceSm;
-            VRCQuickImporterTheme.SetBorderRadius(button, VRCQuickImporterTheme.RadiusImage);
-        }
-
         private VisualElement BuildLibrarySection()
         {
             var section = new VisualElement();
@@ -178,16 +161,6 @@ namespace VRCQuickImporter.Editor.UI
                 : "BOOTHライブラリを最後まで取得し、ローカルJSONキャッシュを作成します。";
             StylePrimarySyncButton(syncButton);
             headerRow.Add(syncButton);
-
-            var fullRefreshButton = new Button(StartFullRefresh)
-            {
-                text = "完全リフレッシュ",
-                name = "full-refresh-button"
-            };
-            fullRefreshButton.SetEnabled(!_librarySyncInProgress && BoothLibraryStore.HasDatabase);
-            fullRefreshButton.tooltip = "BOOTHライブラリを最後まで再取得し、ローカルJSONキャッシュを丸ごと置き換えます。";
-            StyleSecondarySyncButton(fullRefreshButton);
-            headerRow.Add(fullRefreshButton);
 
             var visibleToggle = new Toggle("同期ウインドウを表示")
             {
@@ -560,10 +533,40 @@ namespace VRCQuickImporter.Editor.UI
             summary.style.whiteSpace = WhiteSpace.Normal;
             foldout.Add(summary);
 
+            foldout.Add(BuildSyncMaintenanceSection());
             foldout.Add(BuildLoginSection());
             foldout.Add(BuildPathsSection());
 
             return foldout;
+        }
+
+        private VisualElement BuildSyncMaintenanceSection()
+        {
+            var section = new VisualElement();
+            section.style.marginTop = 6;
+
+            var heading = new Label("同期メンテナンス");
+            BoothFontProvider.Apply(heading, FontStyle.Bold);
+            heading.style.fontSize = 15;
+            section.Add(heading);
+
+            var help = new HelpBox(
+                "通常は上部の「BOOTHと同期」で十分です。完全リフレッシュはローカルJSONキャッシュを全件取り直して置き換えるため、必要な時だけ使ってください。",
+                HelpBoxMessageType.Info);
+            help.style.marginTop = 6;
+            help.style.marginBottom = 6;
+            section.Add(help);
+
+            var fullRefreshButton = new Button(StartFullRefresh)
+            {
+                text = "完全リフレッシュ（全件取り直し）",
+                name = "full-refresh-button"
+            };
+            fullRefreshButton.SetEnabled(!_librarySyncInProgress && BoothLibraryStore.HasDatabase);
+            fullRefreshButton.tooltip = "BOOTHライブラリを最後まで再取得し、ローカルJSONキャッシュを丸ごと置き換えます。";
+            section.Add(fullRefreshButton);
+
+            return section;
         }
 
         private VisualElement BuildLoginSection()
