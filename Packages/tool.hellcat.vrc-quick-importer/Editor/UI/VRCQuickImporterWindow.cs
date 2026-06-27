@@ -119,15 +119,6 @@ namespace VRCQuickImporter.Editor.UI
             syncButton.tooltip = "BOOTHライブラリの1ページ目を再取得します（表示内容はリセットされます）。";
             headerRow.Add(syncButton);
 
-            var nextMaxPage = Mathf.Max(1, _currentMaxPage) + 1;
-            var loadMoreButton = new Button(StartLoadMore)
-            {
-                text = _librarySyncInProgress ? "取得中..." : "もっと読み込む"
-            };
-            loadMoreButton.SetEnabled(!_librarySyncInProgress && BoothLibraryStore.HasDatabase && !_reachedLastPage);
-            loadMoreButton.tooltip = "BOOTHライブラリの「次のページ（" + nextMaxPage + "ページ目）」を読み込みます。";
-            headerRow.Add(loadMoreButton);
-
             var visibleToggle = new Toggle("同期ウインドウを表示")
             {
                 value = _showSyncWindow
@@ -147,7 +138,31 @@ namespace VRCQuickImporter.Editor.UI
 
             section.Add(BuildProductGrid(products));
 
+            section.Add(BuildLoadMoreButton());
+
             return section;
+        }
+
+        private VisualElement BuildLoadMoreButton()
+        {
+            var wrap = new VisualElement();
+            wrap.style.flexDirection = FlexDirection.Row;
+            wrap.style.justifyContent = Justify.Center;
+            wrap.style.marginTop = 12;
+            wrap.style.marginBottom = 4;
+
+            var nextMaxPage = Mathf.Max(1, _currentMaxPage) + 1;
+            var loadMoreButton = new Button(StartLoadMore)
+            {
+                text = _librarySyncInProgress ? "取得中..." : "もっと読み込む"
+            };
+            loadMoreButton.SetEnabled(!_librarySyncInProgress && BoothLibraryStore.HasDatabase && !_reachedLastPage);
+            loadMoreButton.tooltip = _reachedLastPage
+                ? "これ以降ページはありません。"
+                : "BOOTHライブラリの「次のページ（" + nextMaxPage + "ページ目）」を読み込みます。";
+            wrap.Add(loadMoreButton);
+
+            return wrap;
         }
 
         private string BuildLibraryStatusText(int productCount, string storeStatus)
