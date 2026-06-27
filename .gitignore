@@ -1,0 +1,29 @@
+# This repository tracks VRCQuickImporter package development only.
+
+# Agent/private planning notes
+Packages/tool.hellcat.vrc-quick-importer/AGENTS/
+Packages/tool.hellcat.vrc-quick-importer/AGENTS.meta
+Packages/tool.hellcat.vrc-quick-importer/AGENTS/**/*.meta
+
+# Local build outputs for helper tools
+Packages/tool.hellcat.vrc-quick-importer/Tools~/WebView2Host/bin/
+Packages/tool.hellcat.vrc-quick-importer/Tools~/WebView2Host/obj/
+
+# Unity generated folders
+Library/
+Temp/
+Logs/
+UserSettings/
+
+# Existing local Unity project contents not related to this package
+Assets/
+ProjectSettings/
+Packages/*
+!Packages/tool.hellcat.vrc-quick-importer/
+!Packages/tool.hellcat.vrc-quick-importer/**
+
+# Local/reference material outside the package
+instant-meshes/
+vpm-package-template/
+lace-handoff-prompt.md
+plan.md
