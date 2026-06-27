@@ -38,6 +38,8 @@ internal sealed class BrowserForm : Form
     private readonly Button _syncButton;
     private bool _autoSyncAttempted;
     private bool _syncRunning;
+    private CoreWebView2DownloadOperation? _currentDownload;
+    private TaskCompletionSource<bool>? _downloadCompletionSource;
 
     public BrowserForm(HostOptions options)
     {
@@ -181,18 +183,31 @@ internal sealed class BrowserForm : Form
                 {
                     await TryAutoSyncAfterNavigationAsync();
                 }
+                else if (_options.IsDownloadMode && e.IsSuccess)
+                {
+                    await TryStartDownloadAsync();
+                }
             };
             _webView.CoreWebView2.HistoryChanged += (_, _) => UpdateNavigationButtonState();
             _webView.CoreWebView2.DownloadStarting += (_, e) =>
             {
-                var fileName = Path.GetFileName(e.ResultFilePath);
-                if (string.IsNullOrWhiteSpace(fileName))
+                if (_options.IsDownloadMode && !string.IsNullOrEmpty(_options.OutputPath))
                 {
-                    fileName = "download.bin";
+                    e.ResultFilePath = _options.OutputPath;
+                    _currentDownload = e.DownloadOperation;
+                    _currentDownload.StateChanged += OnDownloadStateChanged;
+                    _statusLabel.Text = "ダウンロード開始: " + e.ResultFilePath;
                 }
-
-                e.ResultFilePath = MakeUniquePath(Path.Combine(_options.DownloadDirectory, fileName));
-                _statusLabel.Text = "ダウンロード開始: " + e.ResultFilePath;
+                else
+                {
+                    var fileName = Path.GetFileName(e.ResultFilePath);
+                    if (string.IsNullOrWhiteSpace(fileName))
+                    {
+                        fileName = "download.bin";
+                    }
+                    e.ResultFilePath = MakeUniquePath(Path.Combine(_options.DownloadDirectory, fileName));
+                    _statusLabel.Text = "ダウンロード開始: " + e.ResultFilePath;
+                }
             };
             _webView.CoreWebView2.ProcessFailed += (_, e) =>
             {
@@ -200,7 +215,15 @@ internal sealed class BrowserForm : Form
             };
 
             UpdateNavigationButtonState();
-            Navigate(_options.InitialUrl);
+
+            if (_options.IsDownloadMode)
+            {
+                Navigate(_options.DownloadUrl);
+            }
+            else
+            {
+                Navigate(_options.InitialUrl);
+            }
         }
         catch (Exception ex)
         {
@@ -330,6 +353,54 @@ internal sealed class BrowserForm : Form
         await using (cts.Token.Register(() => tcs.TrySetCanceled()))
         {
             await tcs.Task;
+        }
+    }
+
+    private async Task TryStartDownloadAsync()
+    {
+        var url = _webView.Source?.ToString() ?? string.Empty;
+        if (string.IsNullOrEmpty(url))
+        {
+            _statusLabel.Text = "ダウンロードURLが無効です。";
+            return;
+        }
+
+        _downloadCompletionSource = new TaskCompletionSource<bool>();
+
+        // WebView2がダウンロードを開始するのを待つ（NavigationCompleted後にダウンロードがトリガされる）
+        // DownloadStartingイベントで_downloadCompletionSourceが設定される
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        await using (cts.Token.Register(() => _downloadCompletionSource.TrySetCanceled()))
+        {
+            try
+            {
+                await _downloadCompletionSource.Task;
+                _statusLabel.Text = "ダウンロード完了: " + _options.OutputPath;
+            }
+            catch (OperationCanceledException)
+            {
+                _statusLabel.Text = "ダウンロードがタイムアウトしました。";
+            }
+        }
+
+        await Task.Delay(500);
+        BeginInvoke(Close);
+    }
+
+    private void OnDownloadStateChanged(object? sender, object e)
+    {
+        if (_currentDownload == null) return;
+
+        var state = _currentDownload.State;
+        if (state == CoreWebView2DownloadState.Completed)
+        {
+            _statusLabel.Text = "ダウンロード完了: " + _options.OutputPath;
+            _downloadCompletionSource?.TrySetResult(true);
+        }
+        else if (state == CoreWebView2DownloadState.Interrupted)
+        {
+            _statusLabel.Text = "ダウンロードが中断されました。";
+            _downloadCompletionSource?.TrySetResult(false);
         }
     }
 
@@ -522,12 +593,15 @@ internal sealed class BrowserForm : Form
       .map((fileRow, index) => {
         const fileName = findFileName(fileRow);
         if (!fileName) return null;
+        const dlAnchor = fileRow.querySelector('a[href*=""/downloadables/""]');
+        const dlHref = dlAnchor ? absoluteUrl(dlAnchor.getAttribute('href')) : '';
+        const dlId = dlHref ? (dlHref.match(/\/downloadables\/(\d+)/) || ['', ''])[1] : '';
         return {
-          FileId: productId + ':file:' + index,
+          FileId: dlId || (productId + ':file:' + index),
           Name: fileName,
           SizeText: '',
           Kind: kindFromName(fileName),
-          DownloadUrl: ''
+          DownloadUrl: dlHref
         };
       })
       .filter(Boolean);
@@ -574,6 +648,8 @@ internal sealed class HostOptions
     public bool ExitAfterSync { get; private init; }
     public bool Headless { get; private init; }
     public int Page { get; private init; } = 1;
+    public string DownloadUrl { get; private init; } = string.Empty;
+    public bool IsDownloadMode { get; private init; }
 
     public static HostOptions Parse(string[] args)
     {
@@ -599,6 +675,12 @@ internal sealed class HostOptions
                     if (i + 1 < args.Length && int.TryParse(args[++i], out var pageNumber) && pageNumber >= 1)
                     {
                         options = options.WithPage(pageNumber);
+                    }
+                    break;
+                case "--download":
+                    if (i + 1 < args.Length)
+                    {
+                        options = options.WithDownloadUrl(args[++i]);
                     }
                     break;
                 case "--profile":
@@ -633,6 +715,7 @@ internal sealed class HostOptions
     private HostOptions WithExitAfterSync() => Copy(exitAfterSync: true);
     private HostOptions WithHeadless() => Copy(headless: true);
     private HostOptions WithPage(int value) => Copy(page: value);
+    private HostOptions WithDownloadUrl(string value) => Copy(downloadUrl: value, isDownloadMode: true);
 
     private HostOptions Copy(
         string? profileDirectory = null,
@@ -643,7 +726,9 @@ internal sealed class HostOptions
         bool? syncLibrary = null,
         bool? exitAfterSync = null,
         bool? headless = null,
-        int? page = null) => new()
+        int? page = null,
+        string? downloadUrl = null,
+        bool? isDownloadMode = null) => new()
     {
         ProfileDirectory = profileDirectory ?? ProfileDirectory,
         LogDirectory = logDirectory ?? LogDirectory,
@@ -653,7 +738,9 @@ internal sealed class HostOptions
         SyncLibrary = syncLibrary ?? SyncLibrary,
         ExitAfterSync = exitAfterSync ?? ExitAfterSync,
         Headless = headless ?? Headless,
-        Page = page ?? Page
+        Page = page ?? Page,
+        DownloadUrl = downloadUrl ?? DownloadUrl,
+        IsDownloadMode = isDownloadMode ?? IsDownloadMode
     };
 }
 
