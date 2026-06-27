@@ -4,7 +4,7 @@ BOOTHライブラリからUnityへの取り込みを支援する、VRChat向けU
 
 ## 方針
 
-- WebView2は **BOOTHログイン専用** に使います。
+- WebView2は **BOOTHログインと同期処理用** に限定して使います。
 - BOOTHのライブラリ画面や商品ページをUnity内にそのまま表示する方針ではありません。
 - ログイン後のライブラリ一覧、ダウンロード、展開、Unityへのインポート操作は、Unity EditorWindow上の自作UIで表示・操作します。
 - Chrome/Edgeなど既存ブラウザのCookieは流用しません。
@@ -22,9 +22,14 @@ BOOTHライブラリからUnityへの取り込みを支援する、VRChat向けU
 - プロジェクトローカルのログイン用プロファイル
   - `Library/VRCQuickImporter/webview-profile`
 - ログイン用WebViewのHTML保存ボタン
-- ライブラリ一覧UIの **モック/雛形**
+- ライブラリ一覧UI
   - BOOTHスキリスト風のカードグリッド（サムネ、カテゴリ/タグ、VRCHATバッジ、商品名、ショップ名、価格/いいね、ダウンロードファイル選択ドロップダウン、インポート導線）
-  - 現状はサンプルデータのみ。実際のBOOTH同期・ダウンロード・インポートは未実装（今後実装予定）
+  - `database.json` が無い場合はサンプルデータ表示
+- BOOTHライブラリ同期の初期テスト
+  - WebView2 helperがログイン済みprofileでBOOTHライブラリページを開き、DOMから商品候補を抽出
+  - 結果を `Library/VRCQuickImporter/database.json` に保存
+  - 同期時の抽出JSON/HTMLを `Library/VRCQuickImporter/logs/` に保存
+  - 現時点では商品一覧抽出の運用テスト段階。実ファイル一覧取得・実ダウンロード・実インポートは未実装
 
 ## 開き方
 
@@ -51,6 +56,7 @@ Library/VRCQuickImporter/
   extracted/
   logs/
   webview-profile/
+  database.json
 ```
 
 `Library/VRCQuickImporter/` は削除しても再生成されます。削除した場合、BOOTHへの再ログインが必要になります。

@@ -28,10 +28,30 @@ namespace VRCQuickImporter.Editor.WebView
 
         public static void OpenLogin()
         {
-            Open(LoginUrl);
+            StartHost(new[]
+            {
+                Arg("--profile", VRCQuickImporterPaths.WebViewProfileDirectory),
+                Arg("--logs", VRCQuickImporterPaths.LogsDirectory),
+                Arg("--downloads", VRCQuickImporterPaths.DownloadsDirectory),
+                Arg("--url", LoginUrl)
+            });
         }
 
-        private static void Open(string url)
+        public static Process StartLibrarySync(string outputPath)
+        {
+            return StartHost(new[]
+            {
+                Arg("--profile", VRCQuickImporterPaths.WebViewProfileDirectory),
+                Arg("--logs", VRCQuickImporterPaths.LogsDirectory),
+                Arg("--downloads", VRCQuickImporterPaths.DownloadsDirectory),
+                Arg("--url", "https://accounts.booth.pm/library"),
+                "--sync-library",
+                "--exit-after-sync",
+                Arg("--output", outputPath)
+            });
+        }
+
+        private static Process StartHost(IEnumerable<string> arguments)
         {
 #if UNITY_EDITOR_WIN
             VRCQuickImporterPaths.EnsureDirectories();
@@ -43,23 +63,15 @@ namespace VRCQuickImporter.Editor.WebView
                     "VRCQuickImporter",
                     "WebView2 helper exe が見つかりません。\n\n" + hostExe,
                     "OK");
-                return;
+                return null;
             }
-
-            var arguments = string.Join(" ", new[]
-            {
-                Arg("--profile", VRCQuickImporterPaths.WebViewProfileDirectory),
-                Arg("--logs", VRCQuickImporterPaths.LogsDirectory),
-                Arg("--downloads", VRCQuickImporterPaths.DownloadsDirectory),
-                Arg("--url", url)
-            });
 
             try
             {
                 var process = Process.Start(new ProcessStartInfo
                 {
                     FileName = hostExe,
-                    Arguments = arguments,
+                    Arguments = string.Join(" ", arguments),
                     WorkingDirectory = Path.GetDirectoryName(hostExe) ?? VRCQuickImporterPaths.ProjectRoot,
                     UseShellExecute = false,
                     CreateNoWindow = false
@@ -68,11 +80,12 @@ namespace VRCQuickImporter.Editor.WebView
                 if (process == null)
                 {
                     EditorUtility.DisplayDialog("VRCQuickImporter", "WebView2 helper exe の起動に失敗しました。", "OK");
-                    return;
+                    return null;
                 }
 
                 Processes.Add(process);
                 Debug.Log("[VRCQuickImporter] WebView2 helperを起動しました: " + hostExe);
+                return process;
             }
             catch (Exception ex)
             {
@@ -82,9 +95,11 @@ namespace VRCQuickImporter.Editor.WebView
                     "WebView2 helper exe の起動に失敗しました。\n\n" + ex.Message +
                     "\n\n.NET 8 Desktop Runtime と WebView2 Runtime が必要です。",
                     "OK");
+                return null;
             }
 #else
             EditorUtility.DisplayDialog("VRCQuickImporter", "WebView2 helper はWindows Editor専用です。", "OK");
+            return null;
 #endif
         }
 
