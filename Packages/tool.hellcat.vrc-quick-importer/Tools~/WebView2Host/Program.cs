@@ -600,8 +600,8 @@ internal sealed class BrowserForm : Form
       .map((fileRow, index) => {
         const fileName = findFileName(fileRow);
         if (!fileName) return null;
-        const dlAnchor = fileRow.querySelector('a[href*=""/downloadables/""]');
-        const dlHref = dlAnchor ? absoluteUrl(dlAnchor.getAttribute('href')) : '';
+        const dlBtn = fileRow.querySelector('.js-download-button[data-href]');
+        const dlHref = dlBtn ? absoluteUrl(dlBtn.getAttribute('data-href')) : '';
         const dlId = dlHref ? (dlHref.match(/\/downloadables\/(\d+)/) || ['', ''])[1] : '';
         return {
           FileId: dlId || (productId + ':file:' + index),
