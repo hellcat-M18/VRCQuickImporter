@@ -142,7 +142,7 @@ namespace VRCQuickImporter.Editor.UI
             }
 
             EnsureProductNameSearchLoaded();
-            var products = BoothLibraryStore.LoadProducts(out var storeStatus, out var dataState);
+            var products = BoothLibraryStore.LoadProducts(out _, out var dataState);
             var searchActive = IsProductNameSearchActive() && products.Count > 0;
             var filteredProducts = searchActive ? FilterProductsByName(products) : products;
 
@@ -191,7 +191,7 @@ namespace VRCQuickImporter.Editor.UI
 
             section.Add(headerRow);
 
-            section.Add(BuildLibraryStatePanel(products.Count, storeStatus, dataState));
+            section.Add(BuildLibraryStatePanel(products.Count, dataState));
 
             section.Add(VRCQuickImporterTheme.Spacer(8));
 
@@ -203,7 +203,7 @@ namespace VRCQuickImporter.Editor.UI
             return section;
         }
 
-        private VisualElement BuildLibraryStatePanel(int productCount, string storeStatus, BoothLibraryDataState dataState)
+        private VisualElement BuildLibraryStatePanel(int productCount, BoothLibraryDataState dataState)
         {
             var shell = VRCQuickImporterTheme.MakeShell(VRCQuickImporterTheme.RadiusCardOuter, VRCQuickImporterTheme.SpaceXs);
             shell.name = "library-state-panel";
@@ -217,7 +217,7 @@ namespace VRCQuickImporter.Editor.UI
 
             var accent = new VisualElement();
             accent.style.width = 4;
-            accent.style.height = 54;
+            accent.style.height = 48;
             accent.style.flexShrink = 0;
             accent.style.backgroundColor = GetLibraryStateAccent(dataState);
             VRCQuickImporterTheme.SetBorderRadius(accent, 4);
@@ -228,43 +228,19 @@ namespace VRCQuickImporter.Editor.UI
             textColumn.style.marginLeft = VRCQuickImporterTheme.SpaceLg;
             core.Add(textColumn);
 
-            var eyebrow = new Label(GetLibraryStateEyebrow(dataState));
-            BoothFontProvider.Apply(eyebrow, FontStyle.Bold);
-            eyebrow.style.fontSize = 9;
-            eyebrow.style.color = GetLibraryStateAccent(dataState);
-            textColumn.Add(eyebrow);
-
-            var title = new Label(GetLibraryStateTitle(dataState));
+            var title = new Label(GetSimpleLibraryStateTitle(dataState));
             BoothFontProvider.Apply(title, FontStyle.Bold);
             title.style.fontSize = VRCQuickImporterTheme.FontSection;
             title.style.color = VRCQuickImporterTheme.TextPrimary;
-            title.style.marginTop = 1;
             textColumn.Add(title);
 
-            var body = new Label(BuildLibraryStatusText(productCount, storeStatus));
+            var body = new Label(BuildSimpleLibraryStatusText(productCount, dataState));
             BoothFontProvider.Apply(body, FontStyle.Normal);
             body.style.fontSize = VRCQuickImporterTheme.FontBody;
             body.style.color = VRCQuickImporterTheme.TextMuted;
             body.style.whiteSpace = WhiteSpace.Normal;
             body.style.marginTop = VRCQuickImporterTheme.SpaceXs;
             textColumn.Add(body);
-
-            var meta = new VisualElement();
-            meta.style.flexDirection = FlexDirection.Row;
-            meta.style.flexWrap = Wrap.Wrap;
-            meta.style.justifyContent = Justify.FlexEnd;
-            meta.style.marginLeft = VRCQuickImporterTheme.SpaceLg;
-            meta.style.flexShrink = 0;
-            meta.Add(MakeStateChip(productCount + "件"));
-            if (_currentMaxPage > 0)
-            {
-                meta.Add(MakeStateChip("ページ" + _currentMaxPage));
-            }
-            if (_reachedLastPage)
-            {
-                meta.Add(MakeStateChip("全件取得済み"));
-            }
-            core.Add(meta);
 
             return shell;
         }
@@ -330,36 +306,19 @@ namespace VRCQuickImporter.Editor.UI
             return VRCQuickImporterTheme.Accent;
         }
 
-        private string GetLibraryStateEyebrow(BoothLibraryDataState dataState)
+        private string GetSimpleLibraryStateTitle(BoothLibraryDataState dataState)
         {
-            if (_librarySyncInProgress) return _librarySyncWaitingForRateLimit ? "WAITING" : "SYNCING";
-            if (dataState == BoothLibraryDataState.MissingDatabase) return "GET STARTED";
-            if (dataState == BoothLibraryDataState.Empty) return "EMPTY";
-            if (dataState == BoothLibraryDataState.Error) return "ERROR";
-            return _reachedLastPage ? "COMPLETE" : "READY";
-        }
-
-        private string GetLibraryStateTitle(BoothLibraryDataState dataState)
-        {
-            if (_librarySyncInProgress) return _librarySyncWaitingForRateLimit ? "BOOTHアクセス間隔を調整中" : "BOOTHライブラリを取得中";
-            if (dataState == BoothLibraryDataState.MissingDatabase) return "まだ同期していません";
-            if (dataState == BoothLibraryDataState.Empty) return "同期済みですが商品が見つかりません";
-            if (dataState == BoothLibraryDataState.Error) return "ライブラリデータの確認が必要です";
-            return _reachedLastPage ? "全件取得済み" : "同期済みライブラリ";
+            if (_librarySyncInProgress) return "同期中";
+            if (dataState == BoothLibraryDataState.MissingDatabase) return "未同期";
+            if (dataState == BoothLibraryDataState.Error) return "エラー";
+            return "同期済み";
         }
 
         private bool IsLibraryProblemState(BoothLibraryDataState dataState)
         {
-            if (dataState == BoothLibraryDataState.MissingDatabase || dataState == BoothLibraryDataState.Empty || dataState == BoothLibraryDataState.Error)
-            {
-                return true;
-            }
-
-            if (string.IsNullOrEmpty(_libraryStatusOverride)) return false;
-            return _libraryStatusOverride.Contains("失敗")
-                || _libraryStatusOverride.Contains("タイムアウト")
-                || _libraryStatusOverride.Contains("終了しました")
-                || _libraryStatusOverride.Contains("確認できません");
+            return dataState == BoothLibraryDataState.MissingDatabase
+                || dataState == BoothLibraryDataState.Empty
+                || dataState == BoothLibraryDataState.Error;
         }
 
         private string GetGridStateBadge(BoothLibraryDataState dataState)
@@ -386,25 +345,31 @@ namespace VRCQuickImporter.Editor.UI
             return "右上の「初回セットアップ」から最後のページまで取得し、ローカルJSONキャッシュを作成します。BOOTHアクセスは明示操作ごとに行われます。";
         }
 
-        private string BuildLibraryStatusText(int productCount, string storeStatus)
+        private string BuildSimpleLibraryStatusText(int productCount, BoothLibraryDataState dataState)
         {
-            var lines = new List<string>();
-            if (!string.IsNullOrEmpty(_libraryStatusOverride))
+            var lastSyncedAt = GetLastSyncedAtText();
+            if (_librarySyncInProgress)
             {
-                lines.Add(_libraryStatusOverride);
+                return "表示中: " + productCount + "件\n最終同期: " + lastSyncedAt;
             }
 
-            if (BoothLibraryStore.HasDatabase)
+            if (dataState == BoothLibraryDataState.MissingDatabase)
             {
-                var pagePart = _reachedLastPage
-                    ? "（全件取得済み）"
-                    : (_currentMaxPage > 0 ? "（ページ" + _currentMaxPage + "まで）" : "");
-                var cachePart = BoothLibraryStore.InitialFullSyncCompleted ? " / JSONキャッシュ済み" : " / 旧形式キャッシュ";
-                lines.Add("表示中: " + productCount + "件" + pagePart + cachePart);
+                return "表示中: 0件\n初回セットアップを開始してください";
             }
 
-            lines.Add(storeStatus);
-            return string.Join("\n", lines);
+            if (dataState == BoothLibraryDataState.Error)
+            {
+                return "表示中: 0件\n詳細はConsoleまたはダイアログを確認してください";
+            }
+
+            return "表示中: " + productCount + "件\n最終同期: " + lastSyncedAt;
+        }
+
+        private static string GetLastSyncedAtText()
+        {
+            var document = BoothLibraryStore.LoadDatabaseDocument();
+            return string.IsNullOrWhiteSpace(document?.SyncedAt) ? "-" : document.SyncedAt;
         }
 
         private void EnsureProductNameSearchLoaded()
@@ -1254,7 +1219,26 @@ namespace VRCQuickImporter.Editor.UI
             _syncCollectedProducts.Clear();
             _libraryStatusOverride = keepOverride ? message : string.Empty;
             Debug.Log("[VRCQuickImporter] " + message);
+
+            if (ShouldShowSyncResultDialog(message))
+            {
+                EditorUtility.DisplayDialog("VRCQuickImporter", message, "OK");
+            }
+
             RefreshWindow();
+        }
+
+        private static bool ShouldShowSyncResultDialog(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return false;
+            return message.Contains("失敗")
+                || message.Contains("タイムアウト")
+                || message.Contains("確認できません")
+                || message.Contains("アクセスできません")
+                || message.Contains("作成されていない")
+                || message.Contains("取得できなかった")
+                || message.Contains("安全上限")
+                || message.Contains("終了しました");
         }
 
         private void RefreshWindow()
