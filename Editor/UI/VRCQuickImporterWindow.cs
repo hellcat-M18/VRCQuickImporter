@@ -15,6 +15,13 @@ using Debug = UnityEngine.Debug;
 
 namespace VRCQuickImporter.Editor.UI
 {
+    internal enum LibrarySyncMode
+    {
+        Incremental,
+        InitialSetup,
+        FullRefresh
+    }
+
     public sealed class VRCQuickImporterWindow : EditorWindow
     {
         private Process _librarySyncProcess;
@@ -27,7 +34,11 @@ namespace VRCQuickImporter.Editor.UI
         private int _currentMaxPage;
         private bool _reachedLastPage;
         private int _syncRequestedPage = 1;
-        private bool _syncReplace = true;
+        private LibrarySyncMode _syncMode = LibrarySyncMode.Incremental;
+        private HashSet<string> _knownProductIdsBeforeSync = new HashSet<string>();
+        private readonly List<BoothProduct> _syncCollectedProducts = new List<BoothProduct>();
+        private int _syncNewProductCount;
+        private int _syncFetchedPageCount;
         private bool _librarySyncWaitingForRateLimit;
         private DateTime _librarySyncLaunchAtUtc;
 
@@ -41,6 +52,7 @@ namespace VRCQuickImporter.Editor.UI
         private const int MaxCardWidth = 270;
         private const int CardSpacing = 10;
         private const int GridPadding = 10;
+        private const int MaxSmartSyncPages = 50;
 
         [MenuItem("Tools/VRCQuickImporter/開く")]
         public static void Open()
@@ -98,6 +110,40 @@ namespace VRCQuickImporter.Editor.UI
             return wrap;
         }
 
+        private static void StylePrimarySyncButton(Button button)
+        {
+            BoothFontProvider.Apply(button, FontStyle.Bold);
+            button.style.backgroundColor = VRCQuickImporterTheme.Accent;
+            button.style.color = VRCQuickImporterTheme.AccentFg;
+            button.style.borderTopWidth = 0;
+            button.style.borderRightWidth = 0;
+            button.style.borderBottomWidth = 0;
+            button.style.borderLeftWidth = 0;
+            button.style.marginLeft = VRCQuickImporterTheme.SpaceMd;
+            button.style.paddingLeft = VRCQuickImporterTheme.SpaceXl;
+            button.style.paddingRight = VRCQuickImporterTheme.SpaceXl;
+            button.style.paddingTop = VRCQuickImporterTheme.SpaceSm;
+            button.style.paddingBottom = VRCQuickImporterTheme.SpaceSm;
+            VRCQuickImporterTheme.SetBorderRadius(button, VRCQuickImporterTheme.RadiusImage);
+        }
+
+        private static void StyleSecondarySyncButton(Button button)
+        {
+            BoothFontProvider.Apply(button, FontStyle.Normal);
+            button.style.backgroundColor = VRCQuickImporterTheme.ChipBg;
+            button.style.color = VRCQuickImporterTheme.TextMuted;
+            button.style.borderTopWidth = 0;
+            button.style.borderRightWidth = 0;
+            button.style.borderBottomWidth = 0;
+            button.style.borderLeftWidth = 0;
+            button.style.marginLeft = VRCQuickImporterTheme.SpaceSm;
+            button.style.paddingLeft = VRCQuickImporterTheme.SpaceMd;
+            button.style.paddingRight = VRCQuickImporterTheme.SpaceMd;
+            button.style.paddingTop = VRCQuickImporterTheme.SpaceSm;
+            button.style.paddingBottom = VRCQuickImporterTheme.SpaceSm;
+            VRCQuickImporterTheme.SetBorderRadius(button, VRCQuickImporterTheme.RadiusImage);
+        }
+
         private VisualElement BuildLibrarySection()
         {
             var section = new VisualElement();
@@ -123,12 +169,25 @@ namespace VRCQuickImporter.Editor.UI
 
             var syncButton = new Button(StartLibrarySync)
             {
-                text = _librarySyncInProgress ? "同期中..." : "BOOTHと同期",
+                text = _librarySyncInProgress ? "同期中..." : (BoothLibraryStore.InitialFullSyncCompleted ? "BOOTHと同期" : "初回セットアップ"),
                 name = "sync-button"
             };
             syncButton.SetEnabled(!_librarySyncInProgress);
-            syncButton.tooltip = "BOOTHライブラリの1ページ目を再取得します（表示内容はリセットされます）。";
+            syncButton.tooltip = BoothLibraryStore.InitialFullSyncCompleted
+                ? "BOOTHライブラリを増分同期します。既存商品と重なるページまで取得します。"
+                : "BOOTHライブラリを最後まで取得し、ローカルJSONキャッシュを作成します。";
+            StylePrimarySyncButton(syncButton);
             headerRow.Add(syncButton);
+
+            var fullRefreshButton = new Button(StartFullRefresh)
+            {
+                text = "完全リフレッシュ",
+                name = "full-refresh-button"
+            };
+            fullRefreshButton.SetEnabled(!_librarySyncInProgress && BoothLibraryStore.HasDatabase);
+            fullRefreshButton.tooltip = "BOOTHライブラリを最後まで再取得し、ローカルJSONキャッシュを丸ごと置き換えます。";
+            StyleSecondarySyncButton(fullRefreshButton);
+            headerRow.Add(fullRefreshButton);
 
             var visibleToggle = new Toggle("同期ウインドウを表示")
             {
@@ -147,52 +206,7 @@ namespace VRCQuickImporter.Editor.UI
 
             section.Add(BuildProductGrid(products, dataState));
 
-            section.Add(BuildLoadMoreButton(dataState));
-
             return section;
-        }
-
-        private VisualElement BuildLoadMoreButton(BoothLibraryDataState dataState)
-        {
-            var wrap = new VisualElement();
-            wrap.style.flexDirection = FlexDirection.Column;
-            wrap.style.alignItems = Align.Center;
-            wrap.style.marginTop = 12;
-            wrap.style.marginBottom = 4;
-
-            var nextMaxPage = Mathf.Max(1, _currentMaxPage) + 1;
-            var loadMoreButton = new Button(StartLoadMore)
-            {
-                text = _librarySyncInProgress ? "取得中..." : "もっと読み込む",
-                name = "load-more-button"
-            };
-            loadMoreButton.SetEnabled(!_librarySyncInProgress && dataState == BoothLibraryDataState.Ready && !_reachedLastPage);
-            loadMoreButton.tooltip = _reachedLastPage
-                ? "これ以降ページはありません。"
-                : dataState != BoothLibraryDataState.Ready
-                    ? "まずBOOTHライブラリを同期してください。"
-                    : "BOOTHライブラリの「次のページ（" + nextMaxPage + "ページ目）」を読み込みます。";
-            wrap.Add(loadMoreButton);
-
-            var caption = new Label(BuildLoadMoreCaption(dataState, nextMaxPage)) { name = "load-more-caption" };
-            BoothFontProvider.Apply(caption, FontStyle.Normal);
-            caption.style.marginTop = VRCQuickImporterTheme.SpaceXs;
-            caption.style.fontSize = VRCQuickImporterTheme.FontCaption;
-            caption.style.color = VRCQuickImporterTheme.TextFaint;
-            caption.style.unityTextAlign = TextAnchor.MiddleCenter;
-            wrap.Add(caption);
-
-            return wrap;
-        }
-
-        private string BuildLoadMoreCaption(BoothLibraryDataState dataState, int nextMaxPage)
-        {
-            if (_librarySyncInProgress) return "取得完了までお待ちください。";
-            if (dataState == BoothLibraryDataState.MissingDatabase) return "まず「BOOTHと同期」で1ページ目を取得してください。";
-            if (dataState == BoothLibraryDataState.Empty) return "取得済みデータに商品がないため、追加読み込みはできません。";
-            if (dataState == BoothLibraryDataState.Error) return "データ読み込みエラーを解消してから再試行してください。";
-            if (_reachedLastPage) return "これ以降のページはありません。";
-            return "次はページ" + nextMaxPage + "を取得します。";
         }
 
         private VisualElement BuildLibraryStatePanel(int productCount, string storeStatus, BoothLibraryDataState dataState)
@@ -375,7 +389,7 @@ namespace VRCQuickImporter.Editor.UI
             if (_librarySyncInProgress) return "WebView2 helperがBOOTHの購入履歴ページを取得しています。完了するとここにカードが表示されます。";
             if (dataState == BoothLibraryDataState.Error) return "database.json の読み込みに失敗しました。詳細設定からデータフォルダを開き、必要に応じて再同期してください。";
             if (dataState == BoothLibraryDataState.Empty) return "BOOTH側で購入履歴が見つからない、またはログイン状態が切れている可能性があります。同期ウインドウを表示して再実行すると確認しやすいです。";
-            return "右上の「BOOTHと同期」から1ページ目を取得します。BOOTHアクセスは明示操作ごとに行われ、自動巡回はしません。";
+            return "右上の「初回セットアップ」から最後のページまで取得し、ローカルJSONキャッシュを作成します。BOOTHアクセスは明示操作ごとに行われます。";
         }
 
         private string BuildLibraryStatusText(int productCount, string storeStatus)
@@ -391,7 +405,8 @@ namespace VRCQuickImporter.Editor.UI
                 var pagePart = _reachedLastPage
                     ? "（全件取得済み）"
                     : (_currentMaxPage > 0 ? "（ページ" + _currentMaxPage + "まで）" : "");
-                lines.Add("表示中: " + productCount + "件" + pagePart);
+                var cachePart = BoothLibraryStore.InitialFullSyncCompleted ? " / JSONキャッシュ済み" : " / 旧形式キャッシュ";
+                lines.Add("表示中: " + productCount + "件" + pagePart + cachePart);
             }
 
             lines.Add(storeStatus);
@@ -632,20 +647,54 @@ namespace VRCQuickImporter.Editor.UI
                 return;
             }
 
-            BeginLibrarySync(page: 1, replace: true);
+            if (!BoothLibraryStore.InitialFullSyncCompleted)
+            {
+                if (!ConfirmInitialSetup())
+                {
+                    return;
+                }
+
+                BeginLibrarySync(LibrarySyncMode.InitialSetup);
+                return;
+            }
+
+            BeginLibrarySync(LibrarySyncMode.Incremental);
         }
 
-        private void StartLoadMore()
+        private void StartFullRefresh()
         {
             if (!ConfirmBoothAccess())
             {
                 return;
             }
 
-            BeginLibrarySync(page: Mathf.Max(1, _currentMaxPage) + 1, replace: false);
+            if (!EditorUtility.DisplayDialog(
+                    "完全リフレッシュ",
+                    "BOOTHライブラリを最後のページまで再取得し、ローカルJSONキャッシュを丸ごと置き換えます。\n\n" +
+                    "ページ間は最低2秒待機します。商品数が多い場合は時間がかかります。続行しますか？",
+                    "完全リフレッシュ",
+                    "キャンセル"))
+            {
+                return;
+            }
+
+            BeginLibrarySync(LibrarySyncMode.FullRefresh);
         }
 
-        private void BeginLibrarySync(int page, bool replace)
+        private static bool ConfirmInitialSetup()
+        {
+            return EditorUtility.DisplayDialog(
+                "初回セットアップ",
+                "BOOTHライブラリを最後のページまで取得し、このUnityプロジェクト内にローカルJSONキャッシュを作成します。\n\n" +
+                "・BOOTH購入履歴の複数ページにアクセスします。\n" +
+                "・ページ間は最低2秒待機します。\n" +
+                "・取得データは Library/VRCQuickImporter/database.json に保存します。\n" +
+                "・以後の同期は基本的に増分確認になります。\n\n続行しますか？",
+                "初回セットアップを開始",
+                "キャンセル");
+        }
+
+        private void BeginLibrarySync(LibrarySyncMode mode)
         {
             if (_librarySyncInProgress)
             {
@@ -653,24 +702,18 @@ namespace VRCQuickImporter.Editor.UI
             }
 
             VRCQuickImporterPaths.EnsureDirectories();
+            BoothLibraryStore.DeletePendingPage();
 
-            try
-            {
-                if (File.Exists(VRCQuickImporterPaths.PendingPagePath))
-                {
-                    File.Delete(VRCQuickImporterPaths.PendingPagePath);
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[VRCQuickImporter] pending-page.json のクリアに失敗しました: " + ex.Message);
-            }
-
-            _syncRequestedPage = page;
-            _syncReplace = replace;
+            _syncMode = mode;
+            _syncRequestedPage = 1;
+            _knownProductIdsBeforeSync = BoothLibraryStore.LoadKnownProductIds();
+            _syncCollectedProducts.Clear();
+            _syncNewProductCount = 0;
+            _syncFetchedPageCount = 0;
             _librarySyncInProgress = true;
             _librarySyncProcess = null;
             _librarySyncStartedAtUtc = DateTime.UtcNow;
+            _libraryStatusOverride = GetSyncModeLabel(mode) + "を開始します...";
 
             var wait = GetRemainingBoothLibraryAccessWait();
             if (wait > TimeSpan.Zero)
@@ -691,28 +734,7 @@ namespace VRCQuickImporter.Editor.UI
 
             EditorApplication.update -= PollLibrarySync;
             EditorApplication.update += PollLibrarySync;
-
-            // 「もっと読み込む」の場合は商品グリッドを維持し、ボタン状態だけ更新する
-            if (!replace)
-            {
-                var syncBtn = rootVisualElement.Q<Button>("sync-button");
-                if (syncBtn != null)
-                {
-                    syncBtn.text = "同期中...";
-                    syncBtn.SetEnabled(false);
-                }
-                var loadMoreBtn = rootVisualElement.Q<Button>("load-more-button");
-                if (loadMoreBtn != null)
-                {
-                    loadMoreBtn.text = "取得中...";
-                    loadMoreBtn.SetEnabled(false);
-                }
-            }
-            else
-            {
-                // ページ1再取得は全再構築
-                RefreshWindow();
-            }
+            RefreshWindow();
         }
 
         private bool LaunchLibrarySyncProcess()
@@ -720,7 +742,8 @@ namespace VRCQuickImporter.Editor.UI
             _librarySyncWaitingForRateLimit = false;
             _librarySyncLaunchAtUtc = DateTime.MinValue;
             _librarySyncStartedAtUtc = DateTime.UtcNow;
-            _libraryStatusOverride = (_showSyncWindow ? "WebView2 helperで" : "バックグラウンドで") + "BOOTHライブラリ " + _syncRequestedPage + "ページ目を取得中...";
+            _libraryStatusOverride = (_showSyncWindow ? "WebView2 helperで" : "バックグラウンドで") +
+                                     GetSyncModeLabel(_syncMode) + " - ページ" + _syncRequestedPage + "を取得中...";
 
             _librarySyncProcess = WebView2HostLauncher.StartLibrarySync(VRCQuickImporterPaths.PendingPagePath, headless: !_showSyncWindow, page: _syncRequestedPage);
             if (_librarySyncProcess == null)
@@ -732,6 +755,19 @@ namespace VRCQuickImporter.Editor.UI
             }
 
             return true;
+        }
+
+        private static string GetSyncModeLabel(LibrarySyncMode mode)
+        {
+            switch (mode)
+            {
+                case LibrarySyncMode.InitialSetup:
+                    return "初回セットアップ";
+                case LibrarySyncMode.FullRefresh:
+                    return "完全リフレッシュ";
+                default:
+                    return "増分同期";
+            }
         }
 
         private static TimeSpan GetRemainingBoothLibraryAccessWait()
@@ -802,10 +838,7 @@ namespace VRCQuickImporter.Editor.UI
                     return;
                 }
 
-                if (_syncReplace)
-                {
-                    RefreshWindow();
-                }
+                RefreshWindow();
             }
 
             var elapsed = (float)(DateTime.UtcNow - _librarySyncStartedAtUtc).TotalSeconds;
@@ -814,25 +847,7 @@ namespace VRCQuickImporter.Editor.UI
 
             if (pendingReady)
             {
-                var merge = BoothLibraryStore.MergePendingPage(_syncRequestedPage, _syncReplace);
-                _currentMaxPage = merge.MaxPage;
-                _reachedLastPage = merge.ReachedLastPage;
-
-                string message;
-                if (_syncReplace)
-                {
-                    message = "BOOTHライブラリの同期が完了しました（" + merge.TotalProducts + "件）。";
-                }
-                else
-                {
-                    message = "もっと読み込むが完了しました（" + merge.TotalProducts + "件 / ページ" + _syncRequestedPage + "まで）。";
-                    if (!merge.PageHadProducts)
-                    {
-                        message += " これ以降ページはありません。";
-                    }
-                }
-
-                FinishLibrarySync(message);
+                ProcessPendingLibraryPage();
                 return;
             }
 
@@ -875,6 +890,139 @@ namespace VRCQuickImporter.Editor.UI
             }
         }
 
+        private void ProcessPendingLibraryPage()
+        {
+            WaitForLibrarySyncProcessExitBriefly();
+
+            var pending = BoothLibraryStore.LoadPendingPageDocument();
+            if (pending == null)
+            {
+                BoothLibraryStore.DeletePendingPage();
+                FinishLibrarySync("同期データの読み込みに失敗しました。", keepOverride: true);
+                return;
+            }
+
+            var pageProducts = pending.Products ?? new List<BoothProduct>();
+            var pageHadProducts = pageProducts.Count > 0;
+            var pageIds = pageProducts
+                .Where(p => !string.IsNullOrEmpty(p.ProductId))
+                .Select(p => p.ProductId)
+                .ToList();
+            var overlapsKnown = pageIds.Any(id => _knownProductIdsBeforeSync.Contains(id));
+            var newOnThisPage = pageIds.Count(id => !_knownProductIdsBeforeSync.Contains(id));
+            _syncNewProductCount += newOnThisPage;
+            _syncFetchedPageCount = Math.Max(_syncFetchedPageCount, _syncRequestedPage);
+
+            if (_syncMode == LibrarySyncMode.Incremental)
+            {
+                if (pageHadProducts)
+                {
+                    _syncCollectedProducts.AddRange(pageProducts);
+                }
+
+                BoothLibraryStore.DeletePendingPage();
+
+                if (pageHadProducts && !overlapsKnown && _syncRequestedPage < MaxSmartSyncPages)
+                {
+                    _libraryStatusOverride = "増分同期: ページ" + _syncRequestedPage + "で既存商品と重ならなかったため、次ページを確認します。";
+                    QueueNextLibrarySyncPage();
+                    return;
+                }
+
+                if (_syncCollectedProducts.Count > 0)
+                {
+                    var merged = BoothLibraryStore.MergeProductsIntoDatabase(_syncCollectedProducts, _syncFetchedPageCount);
+                    _currentMaxPage = merged.MaxPage;
+                    _reachedLastPage = merged.ReachedLastPage;
+                }
+
+                if (!pageHadProducts)
+                {
+                    BoothLibraryStore.UpdatePageState(Math.Max(0, _syncRequestedPage - 1), reachedLast: true);
+                    _currentMaxPage = Math.Max(0, _syncRequestedPage - 1);
+                    _reachedLastPage = true;
+                }
+
+                var reason = overlapsKnown
+                    ? "既存商品と重なったため停止しました。"
+                    : pageHadProducts
+                        ? "安全上限に到達したため停止しました。"
+                        : "空ページに到達したため停止しました。";
+                FinishLibrarySync("増分同期が完了しました（新規候補 " + _syncNewProductCount + "件 / 確認ページ " + _syncFetchedPageCount + "）。" + reason);
+                return;
+            }
+
+            if (pageHadProducts)
+            {
+                _syncCollectedProducts.AddRange(pageProducts);
+            }
+
+            BoothLibraryStore.DeletePendingPage();
+
+            if (pageHadProducts && _syncRequestedPage < MaxSmartSyncPages)
+            {
+                _libraryStatusOverride = GetSyncModeLabel(_syncMode) + ": ページ" + _syncRequestedPage + "を取得しました（" + pageProducts.Count + "件）。次ページを取得します。";
+                QueueNextLibrarySyncPage();
+                return;
+            }
+
+            var maxPage = pageHadProducts ? _syncRequestedPage : Math.Max(0, _syncRequestedPage - 1);
+            var document = BoothLibraryStore.ReplaceDatabaseWithProducts(
+                _syncCollectedProducts,
+                maxPage,
+                initialFullSync: _syncMode == LibrarySyncMode.InitialSetup,
+                fullRefresh: _syncMode == LibrarySyncMode.FullRefresh);
+            _currentMaxPage = document.MaxPage;
+            _reachedLastPage = document.ReachedLastPage;
+
+            if (pageHadProducts && _syncRequestedPage >= MaxSmartSyncPages)
+            {
+                FinishLibrarySync(GetSyncModeLabel(_syncMode) + "を安全上限で停止しました（" + document.Products.Count + "件 / ページ" + document.MaxPage + "まで）。", keepOverride: true);
+                return;
+            }
+
+            FinishLibrarySync(GetSyncModeLabel(_syncMode) + "が完了しました（" + document.Products.Count + "件 / ページ" + document.MaxPage + "まで）。");
+        }
+
+        private void QueueNextLibrarySyncPage()
+        {
+            _syncRequestedPage++;
+            _librarySyncProcess = null;
+
+            var wait = GetRemainingBoothLibraryAccessWait();
+            if (wait > TimeSpan.Zero)
+            {
+                _librarySyncWaitingForRateLimit = true;
+                _librarySyncLaunchAtUtc = DateTime.UtcNow.Add(wait);
+                _libraryStatusOverride = $"BOOTHへの次のアクセスまで {wait.TotalSeconds:F1} 秒待機中...";
+                RefreshWindow();
+                return;
+            }
+
+            if (!LaunchLibrarySyncProcess())
+            {
+                EditorApplication.update -= PollLibrarySync;
+                return;
+            }
+
+            RefreshWindow();
+        }
+
+        private void WaitForLibrarySyncProcessExitBriefly()
+        {
+            try
+            {
+                if (_librarySyncProcess != null && !_librarySyncProcess.HasExited)
+                {
+                    _librarySyncProcess.WaitForExit(3000);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] 同期プロセス終了待機に失敗しました: " + ex.Message);
+            }
+        }
+
         private void FinishLibrarySync(string message, bool keepOverride = true)
         {
             EditorApplication.update -= PollLibrarySync;
@@ -882,127 +1030,10 @@ namespace VRCQuickImporter.Editor.UI
             _librarySyncWaitingForRateLimit = false;
             _librarySyncLaunchAtUtc = DateTime.MinValue;
             _librarySyncProcess = null;
+            _syncCollectedProducts.Clear();
             _libraryStatusOverride = keepOverride ? message : string.Empty;
             Debug.Log("[VRCQuickImporter] " + message);
-
-            if (!_syncReplace)
-            {
-                // もっと読み込む: 既存グリッドにappend、ボタンとステータスだけ更新
-                AppendNewProducts();
-            }
-            else
-            {
-                RefreshWindow();
-            }
-        }
-
-        private void AppendNewProducts()
-        {
-            // データベースから最新の商品リストを取得
-            var products = BoothLibraryStore.LoadProducts(out var storeStatus, out var dataState);
-
-            // ボタン状態を更新
-            var syncBtn = rootVisualElement.Q<Button>("sync-button");
-            if (syncBtn != null)
-            {
-                syncBtn.text = "BOOTHと同期";
-                syncBtn.SetEnabled(true);
-            }
-
-            var loadMoreBtn = rootVisualElement.Q<Button>("load-more-button");
-            if (loadMoreBtn != null)
-            {
-                loadMoreBtn.text = "もっと読み込む";
-                loadMoreBtn.SetEnabled(dataState == BoothLibraryDataState.Ready && !_reachedLastPage);
-                loadMoreBtn.tooltip = _reachedLastPage
-                    ? "これ以降ページはありません。"
-                    : dataState != BoothLibraryDataState.Ready
-                        ? "まずBOOTHライブラリを同期してください。"
-                        : "BOOTHライブラリの「次のページ（" + (Mathf.Max(1, _currentMaxPage) + 1) + "ページ目）」を読み込みます。";
-            }
-
-            var loadMoreCaption = rootVisualElement.Q<Label>("load-more-caption");
-            if (loadMoreCaption != null)
-            {
-                loadMoreCaption.text = BuildLoadMoreCaption(dataState, Mathf.Max(1, _currentMaxPage) + 1);
-            }
-
-            var statePanel = rootVisualElement.Q<VisualElement>("library-state-panel");
-            if (statePanel?.parent != null)
-            {
-                var parent = statePanel.parent;
-                var indexInParent = parent.IndexOf(statePanel);
-                parent.Remove(statePanel);
-                parent.Insert(indexInParent, BuildLibraryStatePanel(products.Count, storeStatus, dataState));
-            }
-
-            // グリッドに新商品をappend
-            var grid = rootVisualElement.Q<VisualElement>("product-grid");
-            if (grid == null || !(grid.userData is ProductGridState state))
-            {
-                RefreshWindow();
-                return;
-            }
-
-            var oldCount = state.Products.Count;
-            if (products.Count <= oldCount)
-            {
-                // 新商品がない場合は何もしない
-                return;
-            }
-
-            var newProducts = products.GetRange(oldCount, products.Count - oldCount);
-            state.Products.Clear();
-            state.Products.AddRange(products);
-
-            var availableWidth = grid.resolvedStyle.width - GridPadding * 2;
-            if (availableWidth <= 0)
-            {
-                // レイアウト未確定なら次フレームで再構築
-                state.LastColumnCount = 0;
-                RebuildProductGridRows(grid);
-                return;
-            }
-
-            var layout = CalculateProductGridLayout(availableWidth);
-
-            // 最後の行を見つけて残りスロットを埋める
-            var rows = grid.Children().Where(c => c.name == "product-row").ToList();
-            var lastRow = rows.Count > 0 ? rows[rows.Count - 1] : null;
-            var cardsInLastRow = lastRow?.childCount ?? 0;
-
-            var index = 0;
-
-            // 最後の行の残りを埋める
-            if (lastRow != null && cardsInLastRow < layout.ColumnCount)
-            {
-                for (var col = cardsInLastRow; col < layout.ColumnCount && index < newProducts.Count; col++, index++)
-                {
-                    var card = ProductCard.Build(newProducts[index], (p, f) => OnImportRequested?.Invoke(p, f), OpenProductPage);
-                    ProductCard.ApplyCardWidth(card, layout.CardWidth);
-                    card.style.marginRight = col == layout.ColumnCount - 1 ? 0 : CardSpacing;
-                    lastRow.Add(card);
-                }
-            }
-
-            // 残りを新しい行で追加
-            while (index < newProducts.Count)
-            {
-                var row = new VisualElement { name = "product-row" };
-                row.style.flexDirection = FlexDirection.Row;
-                row.style.marginBottom = CardSpacing;
-                grid.Add(row);
-
-                for (var col = 0; col < layout.ColumnCount && index < newProducts.Count; col++, index++)
-                {
-                    var card = ProductCard.Build(newProducts[index], (p, f) => OnImportRequested?.Invoke(p, f), OpenProductPage);
-                    ProductCard.ApplyCardWidth(card, layout.CardWidth);
-                    card.style.marginRight = col == layout.ColumnCount - 1 ? 0 : CardSpacing;
-                    row.Add(card);
-                }
-            }
-
-            // サムネイルは ProductCard.Build 内で取得される
+            RefreshWindow();
         }
 
         private void RefreshWindow()

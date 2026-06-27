@@ -27,11 +27,20 @@ namespace VRCQuickImporter.Editor.Library
         public string SourceUrl = string.Empty;
         public List<BoothProduct> Products = new List<BoothProduct>();
 
-        /// <summary>「もっと読み込む」でどこまで取得したか（ページ番号）。</summary>
+        /// <summary>ローカルJSONキャッシュが取得済みの最大ページ番号。</summary>
         public int MaxPage = 0;
 
         /// <summary>最終ページまで取得済みの場合 true。</summary>
         public bool ReachedLastPage = false;
+
+        /// <summary>初回フルキャッシュ作成が完了している場合 true。</summary>
+        public bool InitialFullSyncCompleted = false;
+
+        /// <summary>初回フルキャッシュ作成の完了日時。</summary>
+        public string InitialFullSyncCompletedAt = string.Empty;
+
+        /// <summary>完全リフレッシュの完了日時。</summary>
+        public string LastFullRefreshAt = string.Empty;
     }
 
     /// <summary>
