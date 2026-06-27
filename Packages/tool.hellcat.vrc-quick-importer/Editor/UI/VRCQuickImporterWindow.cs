@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using VRCQuickImporter.Editor.Library;
 using VRCQuickImporter.Editor.Storage;
+using VRCQuickImporter.Editor.Thumbnails;
 using VRCQuickImporter.Editor.WebView;
 using Debug = UnityEngine.Debug;
 
@@ -286,13 +287,43 @@ namespace VRCQuickImporter.Editor.UI
             thumbWrap.style.width = PreferredCardWidth - CardPadding * 2;
             thumbWrap.style.height = PreferredCardWidth - CardPadding * 2;
             thumbWrap.style.backgroundColor = ThumbnailBackgroundColor;
+            thumbWrap.style.position = Position.Relative;
+            thumbWrap.style.overflow = Overflow.Hidden;
             SetBorderRadius(thumbWrap, 6);
 
             var placeholder = new Label("サムネ");
             placeholder.style.unityTextAlign = TextAnchor.MiddleCenter;
             placeholder.style.color = ThumbnailTextColor;
             placeholder.style.fontSize = 12;
+            placeholder.style.position = Position.Absolute;
+            placeholder.style.left = 0;
+            placeholder.style.top = 0;
+            placeholder.style.right = 0;
+            placeholder.style.bottom = 0;
             thumbWrap.Add(placeholder);
+
+            var image = new Image();
+            image.scaleMode = ScaleMode.ScaleAndCrop;
+            image.style.position = Position.Absolute;
+            image.style.left = 0;
+            image.style.top = 0;
+            image.style.right = 0;
+            image.style.bottom = 0;
+            image.style.opacity = 0;
+            thumbWrap.Add(image);
+
+            BoothThumbnailCache.GetTexture(product.ThumbnailUrl, texture =>
+            {
+                if (texture == null || thumbWrap == null)
+                {
+                    return;
+                }
+
+                image.image = texture;
+                image.userData = texture;
+                image.style.opacity = 1;
+                placeholder.style.display = DisplayStyle.None;
+            });
 
             // カテゴリ/バッジをサムネ上にオーバーレイ（BOOTHスキリスト風）
             var badgeRow = new VisualElement();

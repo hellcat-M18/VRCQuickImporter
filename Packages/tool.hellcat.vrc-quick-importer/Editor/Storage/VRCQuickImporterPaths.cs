@@ -14,6 +14,7 @@ namespace VRCQuickImporter.Editor.Storage
 
         public static string DataRoot => Path.Combine(ProjectRoot, "Library", "VRCQuickImporter");
         public static string CacheDirectory => Path.Combine(DataRoot, "cache");
+        public static string ThumbnailsDirectory => Path.Combine(DataRoot, "thumbnails");
         public static string DownloadsDirectory => Path.Combine(DataRoot, "downloads");
         public static string ExtractedDirectory => Path.Combine(DataRoot, "extracted");
         public static string WebViewProfileDirectory => Path.Combine(DataRoot, "webview-profile");
@@ -24,6 +25,7 @@ namespace VRCQuickImporter.Editor.Storage
         {
             Directory.CreateDirectory(DataRoot);
             Directory.CreateDirectory(CacheDirectory);
+            Directory.CreateDirectory(ThumbnailsDirectory);
             Directory.CreateDirectory(DownloadsDirectory);
             Directory.CreateDirectory(ExtractedDirectory);
             Directory.CreateDirectory(WebViewProfileDirectory);
