@@ -302,7 +302,14 @@ internal sealed class BrowserForm : Form
                 WriteIndented = true
             });
 
-            await File.WriteAllTextAsync(outputPath, formatted);
+            // アトミック書き込み: テンポラリファイルに書き込んでからリネーム
+            var tmpPath = outputPath + ".tmp";
+            await File.WriteAllTextAsync(tmpPath, formatted);
+            if (File.Exists(outputPath))
+            {
+                File.Delete(outputPath);
+            }
+            File.Move(tmpPath, outputPath);
 
             await File.WriteAllTextAsync(Path.Combine(_options.LogDirectory, "last-library-sync.raw.json"), formatted);
             await SaveCurrentHtmlAsync($"last-library-page-{page:D3}-html.json.txt", showStatus: false);
