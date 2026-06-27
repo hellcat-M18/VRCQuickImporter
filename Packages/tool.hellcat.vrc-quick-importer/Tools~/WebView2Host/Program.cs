@@ -40,6 +40,7 @@ internal sealed class BrowserForm : Form
     private bool _syncRunning;
     private CoreWebView2DownloadOperation? _currentDownload;
     private TaskCompletionSource<bool>? _downloadCompletionSource;
+    private int _blockedLightweightResourceCount;
 
     public BrowserForm(HostOptions options)
     {
@@ -167,6 +168,7 @@ internal sealed class BrowserForm : Form
             _webView.CoreWebView2.Settings.AreDevToolsEnabled = true;
             _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
             _webView.CoreWebView2.Settings.IsStatusBarEnabled = true;
+            ConfigureLightweightLibrarySyncResources();
 
             _webView.CoreWebView2.NavigationStarting += (_, e) =>
             {
@@ -240,6 +242,39 @@ internal sealed class BrowserForm : Form
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
+    }
+
+    private void ConfigureLightweightLibrarySyncResources()
+    {
+        if (!_options.SyncLibrary || _webView.CoreWebView2 == null)
+        {
+            return;
+        }
+
+        _webView.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Image);
+        _webView.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Media);
+        _webView.CoreWebView2.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.Font);
+        _webView.CoreWebView2.WebResourceRequested += (_, e) =>
+        {
+            if (!IsBlockedLightweightResource(e.ResourceContext) || _webView.CoreWebView2 == null)
+            {
+                return;
+            }
+
+            _blockedLightweightResourceCount++;
+            e.Response = _webView.CoreWebView2.Environment.CreateWebResourceResponse(
+                new MemoryStream(Array.Empty<byte>()),
+                204,
+                "No Content",
+                "Cache-Control: no-store\r\nContent-Length: 0");
+        };
+    }
+
+    private static bool IsBlockedLightweightResource(CoreWebView2WebResourceContext context)
+    {
+        return context == CoreWebView2WebResourceContext.Image
+            || context == CoreWebView2WebResourceContext.Media
+            || context == CoreWebView2WebResourceContext.Font;
     }
 
     private async Task TryAutoSyncAfterNavigationAsync()
@@ -321,7 +356,7 @@ internal sealed class BrowserForm : Form
                 ? products.GetArrayLength()
                 : 0;
 
-            _statusLabel.Text = $"同期データを保存しました: {count}件 / ページ{page}";
+            _statusLabel.Text = $"同期データを保存しました: {count}件 / ページ{page} / 軽量化で {_blockedLightweightResourceCount} 件抑制";
 
             if (_options.ExitAfterSync)
             {
