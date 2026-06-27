@@ -26,6 +26,8 @@ namespace VRCQuickImporter.Editor.Library
                     return BoothLibraryMockData.CreateSampleProducts();
                 }
 
+                NormalizeDocument(document);
+
                 statusText = string.IsNullOrEmpty(document.SyncedAt)
                     ? "同期済みデータを表示しています。"
                     : "同期済みデータを表示しています。最終同期: " + document.SyncedAt;
@@ -40,5 +42,53 @@ namespace VRCQuickImporter.Editor.Library
         }
 
         public static bool HasDatabase => File.Exists(VRCQuickImporterPaths.DatabasePath);
+
+        private static void NormalizeDocument(BoothLibraryDocument document)
+        {
+            foreach (var product in document.Products)
+            {
+                product.Name = Normalize(product.Name);
+                product.ShopName = Normalize(product.ShopName);
+                product.CategoryLabel = Normalize(product.CategoryLabel);
+                product.BadgeText = Normalize(product.BadgeText);
+                product.PriceText = Normalize(product.PriceText);
+
+                if (product.ShopName == product.Name)
+                {
+                    product.ShopName = string.Empty;
+                }
+
+                if (product.CategoryLabel.Length > 16 || product.CategoryLabel == product.Name || product.CategoryLabel == product.ShopName || product.CategoryLabel.Contains("."))
+                {
+                    product.CategoryLabel = string.Empty;
+                }
+
+                if (product.BadgeText.Length > 12)
+                {
+                    product.BadgeText = string.Empty;
+                }
+
+                if (!(product.PriceText.Contains("¥") || product.PriceText.Contains("￥") || product.PriceText.Contains("無料")))
+                {
+                    product.PriceText = string.Empty;
+                }
+
+                if (product.Files == null)
+                {
+                    product.Files = new List<BoothDownloadFile>();
+                }
+
+                foreach (var file in product.Files)
+                {
+                    file.Name = Normalize(file.Name);
+                    file.SizeText = Normalize(file.SizeText);
+                }
+            }
+        }
+
+        private static string Normalize(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+        }
     }
 }

@@ -242,17 +242,26 @@ namespace VRCQuickImporter.Editor.UI
 
             body.Add(BuildNameLabel(product));
 
-            if (!string.IsNullOrEmpty(product.ShopName))
+            var shopName = NormalizeOptionalLabel(product.ShopName);
+            if (!string.IsNullOrEmpty(shopName) && shopName != NormalizeOptionalLabel(product.Name))
             {
-                var shopLabel = new Label(product.ShopName);
+                var shopLabel = new Label(shopName);
+                shopLabel.tooltip = shopName;
                 shopLabel.style.color = MutedTextColor;
                 shopLabel.style.fontSize = 11;
                 shopLabel.style.marginTop = 2;
+                shopLabel.style.whiteSpace = WhiteSpace.Normal;
+                shopLabel.style.maxHeight = 32;
+                shopLabel.style.overflow = Overflow.Hidden;
                 body.Add(shopLabel);
             }
 
-            body.Add(BuildPriceLikeRow(product));
-            body.Add(Spacer(4));
+            var priceLikeRow = BuildPriceLikeRow(product);
+            if (priceLikeRow != null)
+            {
+                body.Add(priceLikeRow);
+                body.Add(Spacer(4));
+            }
             body.Add(BuildFileRow(product));
 
             card.Add(body);
@@ -283,14 +292,16 @@ namespace VRCQuickImporter.Editor.UI
             badgeRow.style.flexDirection = FlexDirection.Row;
             badgeRow.style.justifyContent = Justify.SpaceBetween;
 
-            if (!string.IsNullOrEmpty(product.CategoryLabel))
+            var categoryLabel = NormalizeCategoryLabel(product.CategoryLabel, product);
+            if (!string.IsNullOrEmpty(categoryLabel))
             {
-                badgeRow.Add(MakePill(product.CategoryLabel, CategoryPillBgColor, CategoryPillTextColor, bold: false));
+                badgeRow.Add(MakePill(categoryLabel, CategoryPillBgColor, CategoryPillTextColor, bold: false));
             }
 
-            if (!string.IsNullOrEmpty(product.BadgeText))
+            var badgeText = NormalizeBadgeText(product.BadgeText);
+            if (!string.IsNullOrEmpty(badgeText))
             {
-                badgeRow.Add(MakePill(product.BadgeText, VrchatBadgeBgColor, Color.white, bold: true));
+                badgeRow.Add(MakePill(badgeText, VrchatBadgeBgColor, Color.white, bold: true));
             }
 
             thumbWrap.Add(badgeRow);
@@ -300,6 +311,7 @@ namespace VRCQuickImporter.Editor.UI
         private static VisualElement MakePill(string text, Color bg, Color fg, bool bold)
         {
             var pill = new Label(text);
+            pill.tooltip = text;
             pill.style.backgroundColor = bg;
             pill.style.color = fg;
             pill.style.fontSize = 10;
@@ -314,31 +326,45 @@ namespace VRCQuickImporter.Editor.UI
 
         private static VisualElement BuildNameLabel(BoothProduct product)
         {
-            var nameLabel = new Label(string.IsNullOrEmpty(product.Name) ? "(商品名なし)" : product.Name);
+            var name = string.IsNullOrEmpty(product.Name) ? "(商品名なし)" : product.Name;
+            var nameLabel = new Label(name);
+            nameLabel.tooltip = name;
             nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
             nameLabel.style.fontSize = 13;
             nameLabel.style.whiteSpace = WhiteSpace.Normal;
+            nameLabel.style.maxHeight = 52;
+            nameLabel.style.overflow = Overflow.Hidden;
             return nameLabel;
         }
 
         private static VisualElement BuildPriceLikeRow(BoothProduct product)
         {
+            var hasPrice = !string.IsNullOrEmpty(NormalizePriceText(product.PriceText));
+            var hasLike = product.LikeCount > 0;
+            if (!hasPrice && !hasLike)
+            {
+                return null;
+            }
+
             var row = new VisualElement();
             row.style.flexDirection = FlexDirection.Row;
             row.style.marginTop = 4;
 
-            var priceLabel = new Label(string.IsNullOrEmpty(product.PriceText) ? "—" : product.PriceText);
+            var priceLabel = new Label(hasPrice ? NormalizePriceText(product.PriceText) : string.Empty);
             priceLabel.style.color = PriceColor;
             priceLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
             priceLabel.style.fontSize = 13;
             priceLabel.style.flexGrow = 1;
             row.Add(priceLabel);
 
-            var likeLabel = new Label("♥ " + product.LikeCount.ToString("N0"));
-            likeLabel.style.color = LikeColor;
-            likeLabel.style.fontSize = 11;
-            likeLabel.style.alignSelf = Align.FlexEnd;
-            row.Add(likeLabel);
+            if (hasLike)
+            {
+                var likeLabel = new Label("♥ " + product.LikeCount.ToString("N0"));
+                likeLabel.style.color = LikeColor;
+                likeLabel.style.fontSize = 11;
+                likeLabel.style.alignSelf = Align.FlexEnd;
+                row.Add(likeLabel);
+            }
 
             return row;
         }
@@ -362,10 +388,11 @@ namespace VRCQuickImporter.Editor.UI
             var choices = new List<string>(files.Count);
             foreach (var file in files)
             {
-                choices.Add(file.DisplayName);
+                choices.Add(TruncateForCard(file.DisplayName, 34));
             }
 
             var popup = new PopupField<string>(choices, 0);
+            popup.tooltip = files.Count > 0 ? files[0].DisplayName : string.Empty;
             popup.style.marginBottom = 4;
             row.Add(popup);
 
@@ -541,6 +568,47 @@ namespace VRCQuickImporter.Editor.UI
         private void OnDisable()
         {
             EditorApplication.update -= PollLibrarySync;
+        }
+
+        private static string NormalizeOptionalLabel(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+        }
+
+        private static string NormalizeCategoryLabel(string value, BoothProduct product)
+        {
+            value = NormalizeOptionalLabel(value);
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+            if (value.Length > 16) return string.Empty;
+            if (value == NormalizeOptionalLabel(product.Name)) return string.Empty;
+            if (value == NormalizeOptionalLabel(product.ShopName)) return string.Empty;
+            if (value.Contains(".")) return string.Empty;
+            return value;
+        }
+
+        private static string NormalizeBadgeText(string value)
+        {
+            value = NormalizeOptionalLabel(value);
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+            if (value.Length > 12) return string.Empty;
+            return value;
+        }
+
+        private static string NormalizePriceText(string value)
+        {
+            value = NormalizeOptionalLabel(value);
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+            if (value.Length > 24) return string.Empty;
+            if (value.Contains("¥") || value.Contains("￥") || value.Contains("無料")) return value;
+            return string.Empty;
+        }
+
+        private static string TruncateForCard(string value, int maxLength)
+        {
+            value = NormalizeOptionalLabel(value);
+            if (value.Length <= maxLength) return value;
+            if (maxLength <= 1) return "…";
+            return value.Substring(0, maxLength - 1) + "…";
         }
 
         private static void ClearWebViewProfile()

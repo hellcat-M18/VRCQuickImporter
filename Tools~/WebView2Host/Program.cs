@@ -411,6 +411,7 @@ internal sealed class BrowserForm : Form
   const absoluteUrl = value => {
     try { return value ? new URL(value, location.href).href : ''; } catch { return ''; }
   };
+  const hasClasses = (element, ...classes) => element && classes.every(className => element.classList.contains(className));
   const itemIdFromUrl = href => {
     const match = (href || '').match(/\/items\/(\d+)/);
     return match ? match[1] : '';
@@ -422,69 +423,85 @@ internal sealed class BrowserForm : Form
     if (/\.(png|jpg|jpeg|webp|gif)$/.test(lower)) return 3;
     return 0;
   };
-  const findCard = anchor => anchor.closest('article, li, [class*=""item""], [class*=""product""], [class*=""card""], [class*=""library""]') || anchor.parentElement || anchor;
-  const bestText = card => Array.from(card.querySelectorAll('a, h1, h2, h3, h4, p, span, div'))
-    .map(el => normalize(el.innerText || el.textContent))
-    .filter(text => text.length >= 2 && text.length <= 160);
+  const directElementChildren = element => Array.from(element ? element.children : []).filter(child => child instanceof HTMLElement);
+  const findProductBlocks = () => Array.from(document.querySelectorAll('main div'))
+    .filter(element => hasClasses(element, 'mb-16', 'bg-white', 'p-16'))
+    .filter(element => element.querySelector('a[href*=""/items/""] img.l-library-item-thumbnail'));
+  const findProductRow = block => directElementChildren(block)
+    .find(element => hasClasses(element, 'flex', 'border-b', 'pb-16')) || block;
+  const findTitleAnchor = row => Array.from(row.querySelectorAll('a[href*=""/items/""]'))
+    .find(anchor => normalize(anchor.innerText || anchor.textContent).length > 0);
+  const findShopAnchor = row => Array.from(row.querySelectorAll('a[href]'))
+    .find(anchor => !/\/items\//.test(anchor.getAttribute('href') || '') && /\.booth\.pm\/?/.test(anchor.href || '') && normalize(anchor.innerText || anchor.textContent).length > 0);
+  const findFileRows = block => Array.from(block.querySelectorAll('div'))
+    .filter(element => hasClasses(element, 'mt-16', 'desktop:flex', 'desktop:justify-between', 'desktop:items-center'));
+  const findFileName = row => {
+    const nameContainer = Array.from(row.querySelectorAll('div')).find(element => hasClasses(element, 'min-w-0', 'break-words', 'whitespace-pre-line'));
+    const text14 = nameContainer && Array.from(nameContainer.querySelectorAll('div')).find(element => element.classList.contains('text-14'));
+    return normalize((text14 || nameContainer || row).innerText || (text14 || nameContainer || row).textContent);
+  };
 
-  const anchors = Array.from(document.querySelectorAll('a[href*=""/items/""]'));
-  const productsById = new Map();
+  const products = [];
+  const seen = new Set();
 
-  for (const anchor of anchors) {
-    const href = absoluteUrl(anchor.getAttribute('href'));
+  for (const block of findProductBlocks()) {
+    const row = findProductRow(block);
+    const image = row.querySelector('img.l-library-item-thumbnail');
+    const imageAnchor = image && image.closest('a[href*=""/items/""]');
+    const titleAnchor = findTitleAnchor(row) || imageAnchor;
+    const href = absoluteUrl(titleAnchor && titleAnchor.getAttribute('href'));
     const productId = itemIdFromUrl(href);
-    if (!productId || productsById.has(productId)) continue;
+    if (!productId || seen.has(productId)) continue;
 
-    const card = findCard(anchor);
-    const image = card.querySelector('img');
-    const texts = bestText(card);
-    const anchorText = normalize(anchor.innerText || anchor.textContent);
-    const imageAlt = normalize(image && image.getAttribute('alt'));
-    const name = anchorText || imageAlt || texts[0] || ('BOOTH item ' + productId);
-    const price = texts.find(text => /(?:¥|￥|無料|free)/i.test(text)) || '';
-    const likeText = texts.find(text => /(?:♥|♡|いいね|like)/i.test(text)) || '';
-    const likeMatch = likeText.replace(/,/g, '').match(/(\d{1,7})/);
-    const category = texts.find(text => /(?:3D|衣装|アバター|キャラクター|アクセサリ|テクスチャ|素材|ツール|イラスト)/.test(text)) || '';
-    const shopCandidate = texts.find(text => text !== name && text !== price && text !== category && !/VRCHAT/i.test(text) && text.length <= 48) || '';
-    const downloadButtons = Array.from(card.querySelectorAll('a, button'))
-      .map(el => normalize(el.innerText || el.textContent))
-      .filter(text => /(?:download|ダウンロード|\.zip|\.unitypackage)/i.test(text));
+    const titleElement = titleAnchor && (titleAnchor.querySelector('.font-bold') || titleAnchor);
+    const name = normalize(titleElement && (titleElement.innerText || titleElement.textContent));
+    if (!name) continue;
 
-    const files = downloadButtons.length > 0
-      ? downloadButtons.slice(0, 8).map((text, index) => ({
-          FileId: productId + ':candidate:' + index,
-          Name: text,
+    const shopAnchor = findShopAnchor(row);
+    const shopElement = shopAnchor && (shopAnchor.querySelector('.text-text-gray600') || shopAnchor);
+    let shopName = normalize(shopElement && (shopElement.innerText || shopElement.textContent));
+    if (shopName === name) shopName = '';
+
+    const files = findFileRows(block)
+      .map((fileRow, index) => {
+        const fileName = findFileName(fileRow);
+        if (!fileName) return null;
+        return {
+          FileId: productId + ':file:' + index,
+          Name: fileName,
           SizeText: '',
-          Kind: kindFromName(text),
+          Kind: kindFromName(fileName),
           DownloadUrl: ''
-        }))
-      : [{
-          FileId: productId + ':detail',
-          Name: 'ファイル一覧は次フェーズで取得',
-          SizeText: '',
-          Kind: 0,
-          DownloadUrl: ''
-        }];
+        };
+      })
+      .filter(Boolean);
 
-    productsById.set(productId, {
+    products.push({
       ProductId: productId,
       Name: name,
-      ShopName: shopCandidate,
+      ShopName: shopName,
       ThumbnailUrl: absoluteUrl(image && (image.currentSrc || image.src || image.getAttribute('src'))),
       ProductUrl: href,
-      Files: files,
-      CategoryLabel: category || 'BOOTH',
-      BadgeText: /vrchat/i.test(texts.join(' ')) ? 'VRCHAT' : '',
-      PriceText: price,
-      LikeCount: likeMatch ? parseInt(likeMatch[1], 10) : 0
+      Files: files.length > 0 ? files : [{
+        FileId: productId + ':detail',
+        Name: 'ファイル一覧未取得',
+        SizeText: '',
+        Kind: 0,
+        DownloadUrl: ''
+      }],
+      CategoryLabel: '',
+      BadgeText: '',
+      PriceText: '',
+      LikeCount: 0
     });
+    seen.add(productId);
   }
 
   return {
     SchemaVersion: '1',
     SyncedAt: new Date().toLocaleString(),
     SourceUrl: location.href,
-    Products: Array.from(productsById.values()).slice(0, 200)
+    Products: products.slice(0, 200)
   };
 })()
 ";
