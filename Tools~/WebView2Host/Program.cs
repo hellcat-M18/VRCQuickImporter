@@ -229,10 +229,10 @@ internal sealed class BrowserForm : Form
 
         _autoSyncAttempted = true;
         await Task.Delay(1800);
-        await SyncLibraryAsync(manual: false);
+        await SyncAllLibraryPagesAsync();
     }
 
-    private async Task SyncLibraryAsync(bool manual)
+    private async Task SyncAllLibraryPagesAsync()
     {
         if (_syncRunning) return;
 
@@ -242,8 +242,8 @@ internal sealed class BrowserForm : Form
             return;
         }
 
-        var url = _webView.Source?.ToString() ?? string.Empty;
-        if (!IsBoothLibraryUrl(url))
+        var currentUrl = _webView.Source?.ToString() ?? string.Empty;
+        if (!IsBoothLibraryUrl(currentUrl))
         {
             _statusLabel.Text = "BOOTHライブラリへ移動します。ログイン画面が出た場合はログイン後にもう一度「同期」を押してください。";
             Navigate(LibraryUrl);
@@ -252,32 +252,87 @@ internal sealed class BrowserForm : Form
 
         _syncRunning = true;
         _syncButton.Enabled = false;
-        _statusLabel.Text = "BOOTHライブラリを抽出中...";
 
         try
         {
-            await Task.Delay(manual ? 800 : 0);
-            var rawJson = await _webView.CoreWebView2.ExecuteScriptAsync(LibraryExtractionScript);
-            await File.WriteAllTextAsync(Path.Combine(_options.LogDirectory, "last-library-sync.raw.json"), rawJson);
+            var allProducts = new List<JsonElement>();
+            var seenIds = new HashSet<string>(StringComparer.Ordinal);
+            var page = 1;
+            var maxPages = 100;
+
+            while (page <= maxPages)
+            {
+                var pageUrl = page == 1 ? LibraryUrl : $"{LibraryUrl}?page={page}";
+                _statusLabel.Text = $"BOOTHライブラリ {page}ページ目を読み込み中...";
+
+                if (!string.Equals(_webView.Source?.ToString() ?? string.Empty, pageUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    Navigate(pageUrl);
+                    await WaitForLibraryNavigationAsync();
+                }
+
+                var urlAfterWait = _webView.Source?.ToString() ?? string.Empty;
+                if (!IsBoothLibraryUrl(urlAfterWait))
+                {
+                    _statusLabel.Text = "BOOTHライブラリではないページに移動しました。ログインが必要な可能性があります。";
+                    break;
+                }
+
+                await Task.Delay(1200);
+                var rawJson = await _webView.CoreWebView2.ExecuteScriptAsync(LibraryExtractionScript);
+                var pageDocument = JsonDocument.Parse(rawJson);
+                var pageCount = 0;
+
+                if (pageDocument.RootElement.TryGetProperty("Products", out var products) && products.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var product in products.EnumerateArray())
+                    {
+                        if (product.TryGetProperty("ProductId", out var idElement) && idElement.ValueKind == JsonValueKind.String)
+                        {
+                            var id = idElement.GetString() ?? string.Empty;
+                            if (!string.IsNullOrEmpty(id) && seenIds.Add(id))
+                            {
+                                allProducts.Add(product.Clone());
+                            }
+                        }
+                    }
+
+                    pageCount = products.GetArrayLength();
+                }
+
+                await SaveCurrentHtmlAsync($"last-library-page-{page:D3}-html.json.txt", showStatus: false);
+
+                if (pageCount == 0)
+                {
+                    break;
+                }
+
+                page++;
+            }
 
             var outputPath = string.IsNullOrWhiteSpace(_options.OutputPath)
                 ? Path.Combine(_options.LogDirectory, "booth-library.database.json")
                 : _options.OutputPath;
 
-            using var document = JsonDocument.Parse(rawJson);
-            var formatted = JsonSerializer.Serialize(document.RootElement, new JsonSerializerOptions
+            var finalDocument = new
+            {
+                SchemaVersion = "1",
+                SyncedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                SourceUrl = LibraryUrl,
+                Products = allProducts
+            };
+
+            var formatted = JsonSerializer.Serialize(finalDocument, new JsonSerializerOptions
             {
                 WriteIndented = true
             });
 
             await File.WriteAllTextAsync(outputPath, formatted);
-            await SaveCurrentHtmlAsync("last-library-page-html.json.txt", showStatus: false);
 
-            var count = document.RootElement.TryGetProperty("Products", out var products) && products.ValueKind == JsonValueKind.Array
-                ? products.GetArrayLength()
-                : 0;
+            var rawLogPath = Path.Combine(_options.LogDirectory, "last-library-sync.raw.json");
+            await File.WriteAllTextAsync(rawLogPath, formatted);
 
-            _statusLabel.Text = $"同期データを保存しました: {count}件 / {outputPath}";
+            _statusLabel.Text = $"同期データを保存しました: {allProducts.Count}件 / {outputPath}";
 
             if (_options.ExitAfterSync)
             {
@@ -295,6 +350,36 @@ internal sealed class BrowserForm : Form
             _syncRunning = false;
             _syncButton.Enabled = true;
         }
+    }
+
+    private async Task WaitForLibraryNavigationAsync()
+    {
+        var tcs = new TaskCompletionSource();
+        var completed = false;
+
+        void Handler(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            if (completed) return;
+            completed = true;
+            _webView.CoreWebView2.NavigationCompleted -= Handler;
+            tcs.TrySetResult();
+        }
+
+        if (_webView.CoreWebView2 != null)
+        {
+            _webView.CoreWebView2.NavigationCompleted += Handler;
+        }
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await using (cts.Token.Register(() => tcs.TrySetCanceled()))
+        {
+            await tcs.Task;
+        }
+    }
+
+    private async Task SyncLibraryAsync(bool manual)
+    {
+        await SyncAllLibraryPagesAsync();
     }
 
     private static bool IsBoothLibraryUrl(string url)
