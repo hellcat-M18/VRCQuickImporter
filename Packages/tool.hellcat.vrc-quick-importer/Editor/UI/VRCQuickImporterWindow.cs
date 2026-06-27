@@ -264,15 +264,27 @@ namespace VRCQuickImporter.Editor.UI
         private void RestoreScrollOffsetAfterLayout()
         {
             _needsScrollRestore = false;
-            // 行追加直後はレイアウトが未確定のため、次フレームで復元する
+            var scroll = rootVisualElement.Q<ScrollView>();
+            if (scroll == null) return;
+
+            var content = scroll.contentContainer;
+            if (content == null) return;
+
+            // contentContainer の GeometryChangedEvent で
+            // コンテンツ高さが確定した後にスクロール位置を復元する
+            EventCallback<GeometryChangedEvent> handler = null;
+            handler = (evt) =>
+            {
+                content.UnregisterCallback<GeometryChangedEvent>(handler);
+                scroll.scrollOffset = _pendingScrollOffset;
+            };
+            content.RegisterCallback<GeometryChangedEvent>(handler);
+
+            // フォールバック: GeometryChangedEvent が来ない場合に備えて遅延実行も行う
             rootVisualElement.schedule.Execute(() =>
             {
-                var scroll = rootVisualElement.Q<ScrollView>();
-                if (scroll != null)
-                {
-                    scroll.scrollOffset = _pendingScrollOffset;
-                }
-            });
+                scroll.scrollOffset = _pendingScrollOffset;
+            }).StartingIn(200);
         }
 
         private static ProductGridLayout CalculateProductGridLayout(float availableWidth)
