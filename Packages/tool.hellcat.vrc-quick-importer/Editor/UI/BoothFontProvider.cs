@@ -1,6 +1,5 @@
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.TextCore.Text;
 
 namespace VRCQuickImporter.Editor.UI
 {
@@ -53,17 +52,6 @@ namespace VRCQuickImporter.Editor.UI
         {
             var font = style == FontStyle.Bold ? Bold : Regular;
             return font != null ? font : GetDefaultFont();
-        }
-
-        /// <summary>
-        /// 指定したウエイトの FontDefinition を返す。
-        /// -unity-font-definition は -unity-font より優先されるため、
-        /// UI Toolkit への確実な適用にはこちらを使う必要がある。
-        /// </summary>
-        public static FontDefinition? ResolveDefinition(FontStyle style)
-        {
-            var font = style == FontStyle.Bold ? Bold : Regular;
-            return font != null ? FontDefinition.FromFont(font) : (FontDefinition?)null;
         }
 
         private static Font GetDefaultFont()
