@@ -37,17 +37,22 @@ namespace VRCQuickImporter.Editor.WebView
             });
         }
 
-        public static Process StartLibrarySync(string outputPath, bool headless = true)
+        public static Process StartLibrarySync(string outputPath, bool headless = true, int page = 1)
         {
+            var url = page <= 1
+                ? "https://accounts.booth.pm/library"
+                : $"https://accounts.booth.pm/library?page={page}";
+
             var args = new List<string>
             {
                 Arg("--profile", VRCQuickImporterPaths.WebViewProfileDirectory),
                 Arg("--logs", VRCQuickImporterPaths.LogsDirectory),
                 Arg("--downloads", VRCQuickImporterPaths.DownloadsDirectory),
-                Arg("--url", "https://accounts.booth.pm/library"),
+                Arg("--url", url),
                 "--sync-library",
                 "--exit-after-sync",
-                Arg("--output", outputPath)
+                Arg("--output", outputPath),
+                Arg("--page", page.ToString())
             };
 
             if (headless)

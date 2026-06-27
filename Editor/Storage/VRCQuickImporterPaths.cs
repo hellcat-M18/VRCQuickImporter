@@ -20,6 +20,7 @@ namespace VRCQuickImporter.Editor.Storage
         public static string WebViewProfileDirectory => Path.Combine(DataRoot, "webview-profile");
         public static string LogsDirectory => Path.Combine(DataRoot, "logs");
         public static string DatabasePath => Path.Combine(DataRoot, "database.json");
+        public static string PendingPagePath => Path.Combine(DataRoot, "pending-page.json");
 
         public static void EnsureDirectories()
         {
