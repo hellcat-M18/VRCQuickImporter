@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -200,7 +201,7 @@ namespace VRCQuickImporter.Editor.UI
         {
             // UI ToolkitのWrap任せだと折り返し境界で余白が不自然になりやすいため、
             // 列数とカード幅をこちらで決め、行単位で明示的に配置する。
-            var grid = new VisualElement();
+            var grid = new VisualElement { name = "product-grid" };
             grid.style.backgroundColor = GridBackgroundColor;
             grid.style.paddingTop = GridPadding;
             grid.style.paddingBottom = GridPadding;
@@ -247,7 +248,7 @@ namespace VRCQuickImporter.Editor.UI
 
             for (var index = 0; index < state.Products.Count;)
             {
-                var row = new VisualElement();
+                var row = new VisualElement { name = "product-row" };
                 row.style.flexDirection = FlexDirection.Row;
                 row.style.marginBottom = CardSpacing;
                 grid.Add(row);
@@ -824,7 +825,111 @@ namespace VRCQuickImporter.Editor.UI
             _librarySyncProcess = null;
             _libraryStatusOverride = keepOverride ? message : string.Empty;
             Debug.Log("[VRCQuickImporter] " + message);
-            RefreshWindow();
+
+            if (!_syncReplace)
+            {
+                // もっと読み込む: 既存グリッドにappend、ボタンとステータスだけ更新
+                AppendNewProducts();
+            }
+            else
+            {
+                RefreshWindow();
+            }
+        }
+
+        private void AppendNewProducts()
+        {
+            // データベースから最新の商品リストを取得
+            var products = BoothLibraryStore.LoadProductsOrMock(out var storeStatus);
+
+            // ボタン状態を更新
+            var syncBtn = rootVisualElement.Q<Button>("sync-button");
+            if (syncBtn != null)
+            {
+                syncBtn.text = "BOOTHと同期";
+                syncBtn.SetEnabled(true);
+            }
+
+            var loadMoreBtn = rootVisualElement.Q<Button>("load-more-button");
+            if (loadMoreBtn != null)
+            {
+                loadMoreBtn.text = "もっと読み込む";
+                loadMoreBtn.SetEnabled(BoothLibraryStore.HasDatabase && !_reachedLastPage);
+                loadMoreBtn.tooltip = _reachedLastPage
+                    ? "これ以降ページはありません。"
+                    : "BOOTHライブラリの「次のページ（" + (Mathf.Max(1, _currentMaxPage) + 1) + "ページ目）」を読み込みます。";
+            }
+
+            // グリッドに新商品をappend
+            var grid = rootVisualElement.Q<VisualElement>("product-grid");
+            if (grid == null || !(grid.userData is ProductGridState state))
+            {
+                RefreshWindow();
+                return;
+            }
+
+            var oldCount = state.Products.Count;
+            if (products.Count <= oldCount)
+            {
+                // 新商品がない場合は何もしない
+                return;
+            }
+
+            var newProducts = products.GetRange(oldCount, products.Count - oldCount);
+            state.Products = products;
+
+            var availableWidth = grid.resolvedStyle.width - GridPadding * 2;
+            if (availableWidth <= 0)
+            {
+                // レイアウト未確定なら次フレームで再構築
+                state.LastColumnCount = 0;
+                RebuildProductGridRows(grid);
+                return;
+            }
+
+            var layout = CalculateProductGridLayout(availableWidth);
+
+            // 最後の行を見つけて残りスロットを埋める
+            var rows = grid.Children().Where(c => c.name == "product-row").ToList();
+            var lastRow = rows.Count > 0 ? rows[rows.Count - 1] : null;
+            var cardsInLastRow = lastRow?.childCount ?? 0;
+
+            var index = 0;
+
+            // 最後の行の残りを埋める
+            if (lastRow != null && cardsInLastRow < layout.ColumnCount)
+            {
+                for (var col = cardsInLastRow; col < layout.ColumnCount && index < newProducts.Count; col++, index++)
+                {
+                    var card = BuildProductCard(newProducts[index]);
+                    ApplyCardSize(card, layout.CardWidth);
+                    card.style.marginRight = col == layout.ColumnCount - 1 ? 0 : CardSpacing;
+                    lastRow.Add(card);
+                }
+            }
+
+            // 残りを新しい行で追加
+            while (index < newProducts.Count)
+            {
+                var row = new VisualElement { name = "product-row" };
+                row.style.flexDirection = FlexDirection.Row;
+                row.style.marginBottom = CardSpacing;
+                grid.Add(row);
+
+                for (var col = 0; col < layout.ColumnCount && index < newProducts.Count; col++, index++)
+                {
+                    var card = BuildProductCard(newProducts[index]);
+                    ApplyCardSize(card, layout.CardWidth);
+                    card.style.marginRight = col == layout.ColumnCount - 1 ? 0 : CardSpacing;
+                    row.Add(card);
+                }
+            }
+
+            // サムネイル取得をトリガー
+            foreach (var product in newProducts)
+            {
+                BoothThumbnailCache.GetOrRequest(product.ThumbnailUrl);
+            }
         }
 
         private void RefreshWindow()
