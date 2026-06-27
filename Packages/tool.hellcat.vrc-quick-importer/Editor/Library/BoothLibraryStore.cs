@@ -79,7 +79,15 @@ namespace VRCQuickImporter.Editor.Library
             }
 
             var pending = TryLoadDocument(VRCQuickImporterPaths.PendingPagePath);
-            var pageProducts = pending?.Products ?? new List<BoothProduct>();
+            if (pending == null)
+            {
+                // pending-page.json の読み込みに失敗（ロック競合など）
+                // 既存データを上書きしないよう、マージを中止する
+                Debug.LogWarning("[VRCQuickImporter] pending-page.json の読み込みに失敗したため、マージをスキップします。");
+                result.PageHadProducts = false;
+                return result;
+            }
+            var pageProducts = pending.Products ?? new List<BoothProduct>();
             result.PageHadProducts = pageProducts.Count > 0;
 
             BoothLibraryDocument main;
@@ -132,20 +140,37 @@ namespace VRCQuickImporter.Editor.Library
 
         private static BoothLibraryDocument TryLoadDocument(string path)
         {
-            try
+            for (var attempt = 0; attempt < 5; attempt++)
             {
-                return JsonUtility.FromJson<BoothLibraryDocument>(File.ReadAllText(path));
+                try
+                {
+                    using (var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var reader = new StreamReader(stream))
+                    {
+                        return JsonUtility.FromJson<BoothLibraryDocument>(reader.ReadToEnd());
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (attempt < 4)
+                    {
+                        System.Threading.Thread.Sleep(200);
+                        continue;
+                    }
+                    Debug.LogWarning("[VRCQuickImporter] ドキュメントの読み込みに失敗しました: " + ex.Message);
+                    return null;
+                }
             }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[VRCQuickImporter] ドキュメントの読み込みに失敗しました: " + ex.Message);
-                return null;
-            }
+            return null;
         }
 
         private static void SaveDocument(BoothLibraryDocument document)
         {
-            File.WriteAllText(VRCQuickImporterPaths.DatabasePath, JsonUtility.ToJson(document, true));
+            var json = JsonUtility.ToJson(document, true);
+            var tmpPath = VRCQuickImporterPaths.DatabasePath + ".tmp";
+            File.WriteAllText(tmpPath, json);
+            File.Copy(tmpPath, VRCQuickImporterPaths.DatabasePath, overwrite: true);
+            try { File.Delete(tmpPath); } catch { }
         }
 
         public struct PageMergeResult
