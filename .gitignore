@@ -1,0 +1,7 @@
+# Agent/private planning notes
+/AGENTS/
+/AGENTS.meta
+
+# Local build outputs for helper tools
+/Tools~/WebView2Host/bin/
+/Tools~/WebView2Host/obj/
