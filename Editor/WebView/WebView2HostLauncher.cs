@@ -37,9 +37,9 @@ namespace VRCQuickImporter.Editor.WebView
             });
         }
 
-        public static Process StartLibrarySync(string outputPath)
+        public static Process StartLibrarySync(string outputPath, bool headless = true)
         {
-            return StartHost(new[]
+            var args = new List<string>
             {
                 Arg("--profile", VRCQuickImporterPaths.WebViewProfileDirectory),
                 Arg("--logs", VRCQuickImporterPaths.LogsDirectory),
@@ -48,7 +48,14 @@ namespace VRCQuickImporter.Editor.WebView
                 "--sync-library",
                 "--exit-after-sync",
                 Arg("--output", outputPath)
-            });
+            };
+
+            if (headless)
+            {
+                args.Add("--headless");
+            }
+
+            return StartHost(args);
         }
 
         private static Process StartHost(IEnumerable<string> arguments)

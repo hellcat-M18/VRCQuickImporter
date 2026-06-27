@@ -43,12 +43,27 @@ internal sealed class BrowserForm : Form
     {
         _options = options;
 
-        Text = options.SyncLibrary
-            ? "VRCQuickImporter - BOOTHライブラリ同期"
-            : "VRCQuickImporter - BOOTHログイン専用";
-        Width = 1200;
-        Height = 820;
-        StartPosition = FormStartPosition.CenterScreen;
+        if (options.Headless)
+        {
+            Text = "VRCQuickImporter - バックグラウンド同期";
+            Width = 1;
+            Height = 1;
+            StartPosition = FormStartPosition.Manual;
+            Left = -32000;
+            Top = -32000;
+            ShowInTaskbar = false;
+            Opacity = 0;
+            WindowState = FormWindowState.Minimized;
+        }
+        else
+        {
+            Text = options.SyncLibrary
+                ? "VRCQuickImporter - BOOTHライブラリ同期"
+                : "VRCQuickImporter - BOOTHログイン専用";
+            Width = 1200;
+            Height = 820;
+            StartPosition = FormStartPosition.CenterScreen;
+        }
 
         var root = new TableLayoutPanel
         {
@@ -516,6 +531,7 @@ internal sealed class HostOptions
     public string OutputPath { get; private init; } = string.Empty;
     public bool SyncLibrary { get; private init; }
     public bool ExitAfterSync { get; private init; }
+    public bool Headless { get; private init; }
 
     public static HostOptions Parse(string[] args)
     {
@@ -533,6 +549,9 @@ internal sealed class HostOptions
                     break;
                 case "--exit-after-sync":
                     options = options.WithExitAfterSync();
+                    break;
+                case "--headless":
+                    options = options.WithHeadless();
                     break;
                 case "--profile":
                 case "--logs":
@@ -564,6 +583,7 @@ internal sealed class HostOptions
     private HostOptions WithOutput(string value) => Copy(outputPath: value);
     private HostOptions WithSyncLibrary() => Copy(syncLibrary: true);
     private HostOptions WithExitAfterSync() => Copy(exitAfterSync: true);
+    private HostOptions WithHeadless() => Copy(headless: true);
 
     private HostOptions Copy(
         string? profileDirectory = null,
@@ -572,7 +592,8 @@ internal sealed class HostOptions
         string? initialUrl = null,
         string? outputPath = null,
         bool? syncLibrary = null,
-        bool? exitAfterSync = null) => new()
+        bool? exitAfterSync = null,
+        bool? headless = null) => new()
     {
         ProfileDirectory = profileDirectory ?? ProfileDirectory,
         LogDirectory = logDirectory ?? LogDirectory,
@@ -580,7 +601,8 @@ internal sealed class HostOptions
         InitialUrl = initialUrl ?? InitialUrl,
         OutputPath = outputPath ?? OutputPath,
         SyncLibrary = syncLibrary ?? SyncLibrary,
-        ExitAfterSync = exitAfterSync ?? ExitAfterSync
+        ExitAfterSync = exitAfterSync ?? ExitAfterSync,
+        Headless = headless ?? Headless
     };
 }
 

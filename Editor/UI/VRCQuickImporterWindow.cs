@@ -18,7 +18,9 @@ namespace VRCQuickImporter.Editor.UI
         private DateTime _librarySyncStartedAtUtc;
         private string _libraryStatusOverride = string.Empty;
         private bool _librarySyncInProgress;
+        private bool _showSyncWindow;
 
+        private const float BackgroundSyncTimeoutSeconds = 120f;
         private const int PreferredCardWidth = 228;
         private const int MinCardWidth = 190;
         private const int MaxCardWidth = 270;
@@ -102,6 +104,15 @@ namespace VRCQuickImporter.Editor.UI
             syncButton.SetEnabled(!_librarySyncInProgress);
             syncButton.tooltip = "ログイン済みのWebView2 helperからBOOTHライブラリの商品候補を取得します";
             headerRow.Add(syncButton);
+
+            var visibleToggle = new Toggle("同期ウインドウを表示")
+            {
+                value = _showSyncWindow
+            };
+            visibleToggle.style.marginLeft = 8;
+            visibleToggle.style.alignSelf = Align.Center;
+            visibleToggle.RegisterValueChangedCallback(evt => _showSyncWindow = evt.newValue);
+            headerRow.Add(visibleToggle);
 
             section.Add(headerRow);
 
@@ -502,8 +513,10 @@ namespace VRCQuickImporter.Editor.UI
 
             VRCQuickImporterPaths.EnsureDirectories();
             _librarySyncStartedAtUtc = DateTime.UtcNow;
-            _libraryStatusOverride = "WebView2 helperでBOOTHライブラリ同期を開始しました。ログイン画面が出た場合はログイン後、helper内の「同期」を押してください。";
-            _librarySyncProcess = WebView2HostLauncher.StartLibrarySync(VRCQuickImporterPaths.DatabasePath);
+            _libraryStatusOverride = _showSyncWindow
+                ? "WebView2 helperでBOOTHライブラリ同期を開始しました。ログイン画面が出た場合はログイン後、helper内の「同期」を押してください。"
+                : "BOOTHライブラリをバックグラウンドで同期中...";
+            _librarySyncProcess = WebView2HostLauncher.StartLibrarySync(VRCQuickImporterPaths.DatabasePath, headless: !_showSyncWindow);
             if (_librarySyncProcess == null)
             {
                 _libraryStatusOverride = "WebView2 helperの起動に失敗しました。";
@@ -519,6 +532,7 @@ namespace VRCQuickImporter.Editor.UI
 
         private void PollLibrarySync()
         {
+            var elapsed = (float)(DateTime.UtcNow - _librarySyncStartedAtUtc).TotalSeconds;
             var databaseUpdated = File.Exists(VRCQuickImporterPaths.DatabasePath) &&
                                   File.GetLastWriteTimeUtc(VRCQuickImporterPaths.DatabasePath) >= _librarySyncStartedAtUtc.AddSeconds(-1);
 
@@ -539,12 +553,31 @@ namespace VRCQuickImporter.Editor.UI
                 if (_librarySyncProcess.HasExited)
                 {
                     FinishLibrarySync("WebView2 helperが終了しました。同期データが作成されていない場合は、ログイン後にもう一度同期してください。", keepOverride: true);
+                    return;
                 }
             }
             catch (Exception ex)
             {
                 Debug.LogWarning("[VRCQuickImporter] 同期プロセス監視に失敗しました: " + ex.Message);
                 FinishLibrarySync("同期プロセス監視に失敗しました。", keepOverride: true);
+                return;
+            }
+
+            if (elapsed > BackgroundSyncTimeoutSeconds)
+            {
+                try
+                {
+                    if (!_librarySyncProcess.HasExited)
+                    {
+                        _librarySyncProcess.Kill();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning("[VRCQuickImporter] 同期プロセスのタイムアウト終了に失敗しました: " + ex.Message);
+                }
+
+                FinishLibrarySync("BOOTHライブラリ同期がタイムアウトしました。ログイン状態を確認するため、「同期ウインドウを表示」をオンにして再実行してください。", keepOverride: true);
             }
         }
 
