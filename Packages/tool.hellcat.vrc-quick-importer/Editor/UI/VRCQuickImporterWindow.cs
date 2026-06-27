@@ -10,6 +10,7 @@ using VRCQuickImporter.Editor.Library;
 using VRCQuickImporter.Editor.Storage;
 using VRCQuickImporter.Editor.Thumbnails;
 using VRCQuickImporter.Editor.WebView;
+using VRCQuickImporter.Editor.Import;
 using Debug = UnityEngine.Debug;
 
 namespace VRCQuickImporter.Editor.UI
@@ -27,6 +28,8 @@ namespace VRCQuickImporter.Editor.UI
         private bool _reachedLastPage;
         private int _syncRequestedPage = 1;
         private bool _syncReplace = true;
+
+        internal event System.Action<BoothProduct, BoothDownloadFile> OnImportRequested;
 
         private const float BackgroundSyncTimeoutSeconds = 120f;
         private const string ConfirmedBoothAccessPrefKey = "VRCQuickImporter.confirmedBoothAccess";
@@ -55,6 +58,8 @@ namespace VRCQuickImporter.Editor.UI
         private void CreateGUI()
         {
             VRCQuickImporterPaths.EnsureDirectories();
+
+            OnImportRequested = OnImportButtonClicked;
 
             var root = rootVisualElement;
             ApplyDefaultFont(root);
@@ -328,7 +333,7 @@ namespace VRCQuickImporter.Editor.UI
             thumbnail.style.height = thumbnailSize;
         }
 
-        private static VisualElement BuildProductCard(BoothProduct product)
+        private VisualElement BuildProductCard(BoothProduct product)
         {
             var card = new VisualElement();
             card.style.width = PreferredCardWidth;
@@ -505,7 +510,7 @@ namespace VRCQuickImporter.Editor.UI
             return row;
         }
 
-        private static VisualElement BuildFileRow(BoothProduct product)
+        private VisualElement BuildFileRow(BoothProduct product)
         {
             var row = new VisualElement();
 
@@ -532,9 +537,15 @@ namespace VRCQuickImporter.Editor.UI
             popup.style.marginBottom = 4;
             row.Add(popup);
 
-            var importButton = new Button { text = "インポート（未実装）" };
-            importButton.SetEnabled(false);
-            importButton.tooltip = "選択したファイルをUnityへインポートします（今後実装予定）";
+            var importButton = new Button(() => OnImportRequested?.Invoke(product, files[popup.index]))
+            {
+                text = "ダウンロード＆インポート"
+            };
+            var hasUrl = files.Count > 0 && !string.IsNullOrEmpty(files[0].DownloadUrl);
+            importButton.SetEnabled(hasUrl);
+            importButton.tooltip = hasUrl
+                ? "選択したファイルをダウンロードしてUnityへインポートします"
+                : "このファイルのダウンロードURLが未取得です。再度ライブラリを同期してください。";
             row.Add(importButton);
 
             return row;
@@ -808,6 +819,25 @@ namespace VRCQuickImporter.Editor.UI
             // RebuildProductGridRows の行追加完了後にスクロール位置を復元する
             _needsScrollRestore = true;
             Repaint();
+        }
+
+        private void OnImportButtonClicked(BoothProduct product, BoothDownloadFile file)
+        {
+            if (!ConfirmBoothAccess())
+            {
+                return;
+            }
+
+            if (_librarySyncInProgress || WebView2HostLauncher.IsRunning)
+            {
+                EditorUtility.DisplayDialog(
+                    "VRCQuickImporter",
+                    "別のBOOTHアクセスが進行中です。完了後に再度お試しください。",
+                    "OK");
+                return;
+            }
+
+            BoothImportPipeline.StartImport(product, file);
         }
 
         private void OnDisable()
