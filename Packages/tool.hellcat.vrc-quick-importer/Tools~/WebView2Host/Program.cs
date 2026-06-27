@@ -222,6 +222,10 @@ internal sealed class BrowserForm : Form
             {
                 Navigate(_options.DownloadUrl);
             }
+            else if (_options.SyncLibrary)
+            {
+                await NavigateLibraryPageAsync(_options.InitialUrl);
+            }
             else
             {
                 Navigate(_options.InitialUrl);
@@ -277,7 +281,7 @@ internal sealed class BrowserForm : Form
             if (!string.Equals(_webView.Source?.ToString() ?? string.Empty, pageUrl, StringComparison.OrdinalIgnoreCase))
             {
                 _statusLabel.Text = $"BOOTHライブラリ {page}ページ目を読み込み中...";
-                Navigate(pageUrl);
+                await NavigateLibraryPageAsync(pageUrl);
                 await WaitForLibraryNavigationAsync();
             }
 
@@ -287,9 +291,6 @@ internal sealed class BrowserForm : Form
                 _statusLabel.Text = "BOOTHライブラリにアクセスできませんでした。ログインが必要です。";
                 return;
             }
-
-            // ページ読み込み完了後、サーバに過度な負荷をかけないよう待機する（間隔の最低保証）
-            await Task.Delay(2000);
 
             _statusLabel.Text = $"BOOTHライブラリ {page}ページ目を抽出中...";
             var rawJson = await _webView.CoreWebView2.ExecuteScriptAsync(LibraryExtractionScript);
@@ -337,6 +338,45 @@ internal sealed class BrowserForm : Form
         {
             _syncRunning = false;
             _syncButton.Enabled = true;
+        }
+    }
+
+    private async Task NavigateLibraryPageAsync(string url)
+    {
+        await WaitAndMarkLibraryAccessAsync();
+        Navigate(url);
+    }
+
+    private async Task WaitAndMarkLibraryAccessAsync()
+    {
+        if (_options.MinAccessIntervalMs <= 0 || string.IsNullOrWhiteSpace(_options.RateLimitFilePath))
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(_options.RateLimitFilePath))
+            {
+                var text = await File.ReadAllTextAsync(_options.RateLimitFilePath);
+                if (DateTimeOffset.TryParse(text.Trim(), out var lastAccessUtc))
+                {
+                    var nextAllowedUtc = lastAccessUtc.ToUniversalTime().AddMilliseconds(_options.MinAccessIntervalMs);
+                    var delay = nextAllowedUtc - DateTimeOffset.UtcNow;
+                    if (delay > TimeSpan.Zero)
+                    {
+                        _statusLabel.Text = $"BOOTHへの次のアクセスまで {delay.TotalSeconds:F1} 秒待機中...";
+                        await Task.Delay(delay);
+                    }
+                }
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(_options.RateLimitFilePath) ?? _options.LogDirectory);
+            await File.WriteAllTextAsync(_options.RateLimitFilePath, DateTimeOffset.UtcNow.ToString("o"));
+        }
+        catch
+        {
+            // レート制限ファイルの読み書きに失敗しても同期自体は続行する。
         }
     }
 
@@ -697,6 +737,8 @@ internal sealed class HostOptions
     public int Page { get; private init; } = 1;
     public string DownloadUrl { get; private init; } = string.Empty;
     public bool IsDownloadMode { get; private init; }
+    public string RateLimitFilePath { get; private init; } = string.Empty;
+    public int MinAccessIntervalMs { get; private init; }
 
     public static HostOptions Parse(string[] args)
     {
@@ -730,11 +772,18 @@ internal sealed class HostOptions
                         options = options.WithDownloadUrl(args[++i]);
                     }
                     break;
+                case "--min-access-interval-ms":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out var intervalMs) && intervalMs >= 0)
+                    {
+                        options = options.WithMinAccessIntervalMs(intervalMs);
+                    }
+                    break;
                 case "--profile":
                 case "--logs":
                 case "--downloads":
                 case "--url":
                 case "--output":
+                case "--rate-limit-file":
                     if (i + 1 >= args.Length) break;
                     var value = args[++i];
                     options = key switch
@@ -744,6 +793,7 @@ internal sealed class HostOptions
                         "--downloads" => options.WithDownloads(value),
                         "--url" => options.WithUrl(value),
                         "--output" => options.WithOutput(value),
+                        "--rate-limit-file" => options.WithRateLimitFile(value),
                         _ => options
                     };
                     break;
@@ -763,6 +813,8 @@ internal sealed class HostOptions
     private HostOptions WithHeadless() => Copy(headless: true);
     private HostOptions WithPage(int value) => Copy(page: value);
     private HostOptions WithDownloadUrl(string value) => Copy(downloadUrl: value, isDownloadMode: true);
+    private HostOptions WithRateLimitFile(string value) => Copy(rateLimitFilePath: value);
+    private HostOptions WithMinAccessIntervalMs(int value) => Copy(minAccessIntervalMs: value);
 
     private HostOptions Copy(
         string? profileDirectory = null,
@@ -775,7 +827,9 @@ internal sealed class HostOptions
         bool? headless = null,
         int? page = null,
         string? downloadUrl = null,
-        bool? isDownloadMode = null) => new()
+        bool? isDownloadMode = null,
+        string? rateLimitFilePath = null,
+        int? minAccessIntervalMs = null) => new()
     {
         ProfileDirectory = profileDirectory ?? ProfileDirectory,
         LogDirectory = logDirectory ?? LogDirectory,
@@ -787,7 +841,9 @@ internal sealed class HostOptions
         Headless = headless ?? Headless,
         Page = page ?? Page,
         DownloadUrl = downloadUrl ?? DownloadUrl,
-        IsDownloadMode = isDownloadMode ?? IsDownloadMode
+        IsDownloadMode = isDownloadMode ?? IsDownloadMode,
+        RateLimitFilePath = rateLimitFilePath ?? RateLimitFilePath,
+        MinAccessIntervalMs = minAccessIntervalMs ?? MinAccessIntervalMs
     };
 }
 

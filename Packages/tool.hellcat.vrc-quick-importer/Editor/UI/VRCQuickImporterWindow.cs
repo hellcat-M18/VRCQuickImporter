@@ -29,10 +29,13 @@ namespace VRCQuickImporter.Editor.UI
         private bool _reachedLastPage;
         private int _syncRequestedPage = 1;
         private bool _syncReplace = true;
+        private bool _librarySyncWaitingForRateLimit;
+        private DateTime _librarySyncLaunchAtUtc;
 
         internal event System.Action<BoothProduct, BoothDownloadFile> OnImportRequested;
 
         private const float BackgroundSyncTimeoutSeconds = 120f;
+        private const double BoothLibraryAccessIntervalSeconds = 2.0;
         private const string ConfirmedBoothAccessPrefKey = "VRCQuickImporter.confirmedBoothAccess";
         private const int PreferredCardWidth = 228;
         private const int MinCardWidth = 190;
@@ -686,18 +689,27 @@ namespace VRCQuickImporter.Editor.UI
 
             _syncRequestedPage = page;
             _syncReplace = replace;
+            _librarySyncInProgress = true;
+            _librarySyncProcess = null;
             _librarySyncStartedAtUtc = DateTime.UtcNow;
-            _libraryStatusOverride = (_showSyncWindow ? "WebView2 helperで" : "バックグラウンドで") + "BOOTHライブラリ " + page + "ページ目を取得中...";
 
-            _librarySyncProcess = WebView2HostLauncher.StartLibrarySync(VRCQuickImporterPaths.PendingPagePath, headless: !_showSyncWindow, page: page);
-            if (_librarySyncProcess == null)
+            var wait = GetRemainingBoothLibraryAccessWait();
+            if (wait > TimeSpan.Zero)
             {
-                _libraryStatusOverride = "WebView2 helperの起動に失敗しました。";
-                RefreshWindow();
-                return;
+                _librarySyncWaitingForRateLimit = true;
+                _librarySyncLaunchAtUtc = DateTime.UtcNow.Add(wait);
+                _libraryStatusOverride = $"BOOTHへの次のアクセスまで {wait.TotalSeconds:F1} 秒待機中...";
+            }
+            else
+            {
+                _librarySyncWaitingForRateLimit = false;
+                _librarySyncLaunchAtUtc = DateTime.MinValue;
+                if (!LaunchLibrarySyncProcess())
+                {
+                    return;
+                }
             }
 
-            _librarySyncInProgress = true;
             EditorApplication.update -= PollLibrarySync;
             EditorApplication.update += PollLibrarySync;
 
@@ -721,6 +733,51 @@ namespace VRCQuickImporter.Editor.UI
             {
                 // ページ1再取得は全再構築
                 RefreshWindow();
+            }
+        }
+
+        private bool LaunchLibrarySyncProcess()
+        {
+            _librarySyncWaitingForRateLimit = false;
+            _librarySyncLaunchAtUtc = DateTime.MinValue;
+            _librarySyncStartedAtUtc = DateTime.UtcNow;
+            _libraryStatusOverride = (_showSyncWindow ? "WebView2 helperで" : "バックグラウンドで") + "BOOTHライブラリ " + _syncRequestedPage + "ページ目を取得中...";
+
+            _librarySyncProcess = WebView2HostLauncher.StartLibrarySync(VRCQuickImporterPaths.PendingPagePath, headless: !_showSyncWindow, page: _syncRequestedPage);
+            if (_librarySyncProcess == null)
+            {
+                _librarySyncInProgress = false;
+                _libraryStatusOverride = "WebView2 helperの起動に失敗しました。";
+                RefreshWindow();
+                return false;
+            }
+
+            return true;
+        }
+
+        private static TimeSpan GetRemainingBoothLibraryAccessWait()
+        {
+            try
+            {
+                var path = VRCQuickImporterPaths.BoothLibraryAccessStampPath;
+                if (!File.Exists(path))
+                {
+                    return TimeSpan.Zero;
+                }
+
+                var text = File.ReadAllText(path).Trim();
+                if (!DateTimeOffset.TryParse(text, out var lastAccessUtc))
+                {
+                    return TimeSpan.Zero;
+                }
+
+                var nextAllowedUtc = lastAccessUtc.ToUniversalTime().AddSeconds(BoothLibraryAccessIntervalSeconds);
+                var wait = nextAllowedUtc - DateTimeOffset.UtcNow;
+                return wait > TimeSpan.Zero ? wait : TimeSpan.Zero;
+            }
+            catch
+            {
+                return TimeSpan.Zero;
             }
         }
 
@@ -751,6 +808,27 @@ namespace VRCQuickImporter.Editor.UI
 
         private void PollLibrarySync()
         {
+            if (_librarySyncWaitingForRateLimit)
+            {
+                var remaining = _librarySyncLaunchAtUtc - DateTime.UtcNow;
+                if (remaining > TimeSpan.Zero)
+                {
+                    _libraryStatusOverride = $"BOOTHへの次のアクセスまで {remaining.TotalSeconds:F1} 秒待機中...";
+                    return;
+                }
+
+                if (!LaunchLibrarySyncProcess())
+                {
+                    EditorApplication.update -= PollLibrarySync;
+                    return;
+                }
+
+                if (_syncReplace)
+                {
+                    RefreshWindow();
+                }
+            }
+
             var elapsed = (float)(DateTime.UtcNow - _librarySyncStartedAtUtc).TotalSeconds;
             var pendingReady = File.Exists(VRCQuickImporterPaths.PendingPagePath) &&
                                File.GetLastWriteTimeUtc(VRCQuickImporterPaths.PendingPagePath) >= _librarySyncStartedAtUtc.AddSeconds(-1);
@@ -822,6 +900,8 @@ namespace VRCQuickImporter.Editor.UI
         {
             EditorApplication.update -= PollLibrarySync;
             _librarySyncInProgress = false;
+            _librarySyncWaitingForRateLimit = false;
+            _librarySyncLaunchAtUtc = DateTime.MinValue;
             _librarySyncProcess = null;
             _libraryStatusOverride = keepOverride ? message : string.Empty;
             Debug.Log("[VRCQuickImporter] " + message);
