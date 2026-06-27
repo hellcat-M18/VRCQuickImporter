@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -20,6 +21,7 @@ namespace VRCQuickImporter.Editor.UI
         private string _libraryStatusOverride = string.Empty;
         private bool _librarySyncInProgress;
         private bool _showSyncWindow;
+        private Vector2 _pendingScrollOffset;
         private int _currentMaxPage;
         private bool _reachedLastPage;
         private int _syncRequestedPage = 1;
@@ -306,8 +308,8 @@ namespace VRCQuickImporter.Editor.UI
 
             body.Add(BuildNameLabel(product));
 
-            var shopName = NormalizeOptionalLabel(product.ShopName);
-            if (!string.IsNullOrEmpty(shopName) && shopName != NormalizeOptionalLabel(product.Name))
+            var shopName = SanitizeDisplayText(NormalizeOptionalLabel(product.ShopName));
+            if (!string.IsNullOrEmpty(shopName) && shopName != SanitizeDisplayText(NormalizeOptionalLabel(product.Name)))
             {
                 var shopLabel = new Label(shopName);
                 shopLabel.tooltip = shopName;
@@ -420,7 +422,7 @@ namespace VRCQuickImporter.Editor.UI
 
         private static VisualElement BuildNameLabel(BoothProduct product)
         {
-            var name = string.IsNullOrEmpty(product.Name) ? "(商品名なし)" : product.Name;
+            var name = SanitizeDisplayText(string.IsNullOrEmpty(product.Name) ? "(商品名なし)" : product.Name);
             var nameLabel = new Label(name);
             nameLabel.tooltip = name;
             nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -486,7 +488,7 @@ namespace VRCQuickImporter.Editor.UI
             }
 
             var popup = new PopupField<string>(choices, 0);
-            popup.tooltip = files.Count > 0 ? files[0].DisplayName : string.Empty;
+            popup.tooltip = files.Count > 0 ? SanitizeDisplayText(files[0].DisplayName) : string.Empty;
             popup.style.marginBottom = 4;
             row.Add(popup);
 
@@ -753,8 +755,26 @@ namespace VRCQuickImporter.Editor.UI
 
         private void RefreshWindow()
         {
+            // 再構築でスクロール位置が先頭に戻らないよう、事前に保存して再適用する
+            var existing = rootVisualElement.Q<ScrollView>();
+            if (existing != null)
+            {
+                _pendingScrollOffset = existing.scrollOffset;
+            }
+
             rootVisualElement.Clear();
             CreateGUI();
+
+            // レイアウト確定後にスクロール位置を復元する
+            rootVisualElement.schedule.Execute(() =>
+            {
+                var scroll = rootVisualElement.Q<ScrollView>();
+                if (scroll != null)
+                {
+                    scroll.scrollOffset = _pendingScrollOffset;
+                }
+            });
+
             Repaint();
         }
 
@@ -798,10 +818,59 @@ namespace VRCQuickImporter.Editor.UI
 
         private static string TruncateForCard(string value, int maxLength)
         {
-            value = NormalizeOptionalLabel(value);
+            value = SanitizeDisplayText(NormalizeOptionalLabel(value));
             if (value.Length <= maxLength) return value;
             if (maxLength <= 1) return "…";
             return value.Substring(0, maxLength - 1) + "…";
+        }
+
+        /// <summary>
+        /// UI Toolkitで描画できない絵文字（カラー絵文字・制御文字）を取り除き、豆腐（□）を防ぐ。
+        /// BMP内の一般的な記号（★♪など）は保持する。
+        /// </summary>
+        private static string SanitizeDisplayText(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return value;
+            }
+
+            var builder = new StringBuilder(value.Length);
+            for (var i = 0; i < value.Length; i++)
+            {
+                var ch = value[i];
+                var code = (int)ch;
+
+                // バリエーションセレクタ / ゼロ幅文字（単独では描画されない、絵文字表示制御用）
+                if (code == 0xFE0E || code == 0xFE0F || code == 0xFEFF) continue;
+                if (code >= 0x200B && code <= 0x200D) continue;
+
+                // サロゲートペア（第1面外の絵文字等）
+                if (char.IsHighSurrogate(ch) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
+                {
+                    var codePoint = char.ConvertToUtf32(ch, value[i + 1]);
+                    if (IsUnsupportedEmojiCodePoint(codePoint))
+                    {
+                        i++; // 下位サロゲートも読み飛ばす
+                        continue;
+                    }
+
+                    builder.Append(ch);
+                    builder.Append(value[i + 1]);
+                    i++;
+                    continue;
+                }
+
+                builder.Append(ch);
+            }
+
+            return builder.ToString();
+        }
+
+        private static bool IsUnsupportedEmojiCodePoint(int codePoint)
+        {
+            return (codePoint >= 0x1F1E6 && codePoint <= 0x1F1FF) // 国旗
+                || (codePoint >= 0x1F300 && codePoint <= 0x1FAFF); // 絵文字・ピクトグラム
         }
 
         private static void ClearWebViewProfile()
