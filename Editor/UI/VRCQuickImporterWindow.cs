@@ -6,6 +6,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using UnityEngine.TextCore.Text;
 using VRCQuickImporter.Editor.Library;
 using VRCQuickImporter.Editor.Storage;
 using VRCQuickImporter.Editor.Thumbnails;
@@ -81,7 +82,6 @@ namespace VRCQuickImporter.Editor.UI
 
             var title = new Label("VRCQuickImporter");
             ApplyFont(title, FontStyle.Bold);
-            title.style.unityFontStyleAndWeight = FontStyle.Bold;
             title.style.fontSize = 20;
             wrap.Add(title);
 
@@ -110,7 +110,6 @@ namespace VRCQuickImporter.Editor.UI
 
             var heading = new Label("BOOTHライブラリ");
             ApplyFont(heading, FontStyle.Bold);
-            heading.style.unityFontStyleAndWeight = FontStyle.Bold;
             heading.style.fontSize = 15;
             heading.style.flexGrow = 1;
             heading.style.alignSelf = Align.Center;
@@ -415,7 +414,6 @@ namespace VRCQuickImporter.Editor.UI
             pill.style.backgroundColor = bg;
             pill.style.color = fg;
             pill.style.fontSize = 10;
-            pill.style.unityFontStyleAndWeight = bold ? FontStyle.Bold : FontStyle.Normal;
             pill.style.paddingLeft = 6;
             pill.style.paddingRight = 6;
             pill.style.paddingTop = 2;
@@ -430,7 +428,6 @@ namespace VRCQuickImporter.Editor.UI
             var nameLabel = new Label(name);
             nameLabel.tooltip = name;
             ApplyFont(nameLabel, FontStyle.Bold);
-            nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
             nameLabel.style.fontSize = 13;
             nameLabel.style.whiteSpace = WhiteSpace.Normal;
             nameLabel.style.maxHeight = 52;
@@ -454,7 +451,6 @@ namespace VRCQuickImporter.Editor.UI
             var priceLabel = new Label(hasPrice ? NormalizePriceText(product.PriceText) : string.Empty);
             priceLabel.style.color = PriceColor;
             ApplyFont(priceLabel, FontStyle.Bold);
-            priceLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
             priceLabel.style.fontSize = 13;
             priceLabel.style.flexGrow = 1;
             row.Add(priceLabel);
@@ -513,7 +509,6 @@ namespace VRCQuickImporter.Editor.UI
 
             var heading = new Label("BOOTHログイン / 同期（WebView2 helper）");
             ApplyFont(heading, FontStyle.Bold);
-            heading.style.unityFontStyleAndWeight = FontStyle.Bold;
             heading.style.fontSize = 15;
             section.Add(heading);
 
@@ -540,7 +535,6 @@ namespace VRCQuickImporter.Editor.UI
 
             var heading = new Label("データ / 設定");
             ApplyFont(heading, FontStyle.Bold);
-            heading.style.unityFontStyleAndWeight = FontStyle.Bold;
             heading.style.fontSize = 15;
             section.Add(heading);
 
@@ -574,7 +568,6 @@ namespace VRCQuickImporter.Editor.UI
 
             var labelElement = new Label(label);
             ApplyFont(labelElement, FontStyle.Bold);
-            labelElement.style.unityFontStyleAndWeight = FontStyle.Bold;
             row.Add(labelElement);
 
             var pathElement = new TextField { value = path, isReadOnly = true };
@@ -835,27 +828,30 @@ namespace VRCQuickImporter.Editor.UI
 
         /// <summary>
         /// Noto Sans JP をルートに適用し、子要素にも継承させる。
-        /// TextCoreのfont-definition優先を回避するためunityFontを使う。
+        /// -unity-font-definition は -unity-font より優先されるため、こちらに設定する。
         /// </summary>
         private static void ApplyDefaultFont(VisualElement element)
         {
-            var regular = BoothFontProvider.Resolve(FontStyle.Normal);
-            if (regular != null)
+            var definition = BoothFontProvider.ResolveDefinition(FontStyle.Normal);
+            if (definition.HasValue)
             {
-                element.style.unityFont = regular;
+                element.style.unityFontDefinition = definition.Value;
             }
         }
 
         /// <summary>
         /// 要素にウエイトに応じたフォントを適用する。
+        /// BoldにはBold用フォントを直接割り当て、合成太字（二重太字）を避けるため
+        /// unityFontStyleAndWeight は Normal にする。
         /// </summary>
         private static void ApplyFont(VisualElement element, FontStyle style)
         {
-            var font = BoothFontProvider.Resolve(style);
-            if (font != null)
+            var definition = BoothFontProvider.ResolveDefinition(style);
+            if (definition.HasValue)
             {
-                element.style.unityFont = font;
+                element.style.unityFontDefinition = definition.Value;
             }
+            element.style.unityFontStyleAndWeight = FontStyle.Normal;
         }
 
         /// <summary>
