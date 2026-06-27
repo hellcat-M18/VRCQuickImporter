@@ -189,9 +189,9 @@ namespace VRCQuickImporter.Editor.UI
 
         private static Label BuildNameLabel(BoothProduct product)
         {
-            var name = BoothTextUtil.SanitizeDisplayText(string.IsNullOrEmpty(product.Name) ? "(商品名なし)" : product.Name);
-            var nameLabel = new Label(name);
-            nameLabel.tooltip = name;
+            var rawName = BoothTextUtil.SanitizeDisplayText(string.IsNullOrEmpty(product.Name) ? "(商品名なし)" : product.Name);
+            var nameLabel = new Label(rawName);
+            nameLabel.tooltip = rawName;
             BoothFontProvider.Apply(nameLabel, FontStyle.Bold);
             nameLabel.style.fontSize = VRCQuickImporterTheme.FontCardName;
             nameLabel.style.color = VRCQuickImporterTheme.TextPrimary;
@@ -287,7 +287,7 @@ namespace VRCQuickImporter.Editor.UI
             chip.style.paddingBottom = 2;
             chip.style.marginRight = VRCQuickImporterTheme.SpaceXs;
             chip.style.marginTop = 2;
-            VRCQuickImporterTheme.SetBorderRadius(chip, VRCQuickImporterTheme.RadiusPill);
+            VRCQuickImporterTheme.SetBorderRadius(chip, VRCQuickImporterTheme.RadiusChip);
             return chip;
         }
 
@@ -319,7 +319,7 @@ namespace VRCQuickImporter.Editor.UI
 
             var popup = new PopupField<string>(choices, 0);
             popup.tooltip = files.Count > 0 ? BoothTextUtil.SanitizeDisplayText(files[0].DisplayName) : string.Empty;
-            popup.style.marginBottom = VRCQuickImporterTheme.SpaceXs;
+            popup.style.marginBottom = VRCQuickImporterTheme.SpaceMd;
             row.Add(popup);
 
             var importButton = new Button(() => onImport?.Invoke(product, files[popup.index]))
@@ -343,7 +343,7 @@ namespace VRCQuickImporter.Editor.UI
                 };
                 StyleSubButton(openPageButton);
                 openPageButton.tooltip = "BOOTHの商品ページをブラウザで開きます";
-                openPageButton.style.marginTop = VRCQuickImporterTheme.SpaceXs;
+                openPageButton.style.marginTop = VRCQuickImporterTheme.SpaceMd;
                 openPageButton.style.width = new Length(100, LengthUnit.Percent);
                 row.Add(openPageButton);
             }
