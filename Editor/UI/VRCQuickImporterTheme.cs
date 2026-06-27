@@ -25,6 +25,10 @@ namespace VRCQuickImporter.Editor.UI
         public const float RadiusImage = 8f;
         public const float RadiusPill = 100f;
 
+        // ---- Card fixed heights (align all cards regardless of text length) ----
+        public const float CardNameHeight = 34f;
+        public const float CardShopHeight = 16f;
+
         // ---- Typography sizes ----
         public const int FontTitle = 20;
         public const int FontSection = 15;
