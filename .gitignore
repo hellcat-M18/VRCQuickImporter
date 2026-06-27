@@ -5,9 +5,10 @@ Packages/tool.hellcat.vrc-quick-importer/AGENTS/
 Packages/tool.hellcat.vrc-quick-importer/AGENTS.meta
 Packages/tool.hellcat.vrc-quick-importer/AGENTS/**/*.meta
 
-# Local build outputs for helper tools
+# Local build outputs and debug symbols for helper tools
 Packages/tool.hellcat.vrc-quick-importer/Tools~/WebView2Host/bin/
 Packages/tool.hellcat.vrc-quick-importer/Tools~/WebView2Host/obj/
+*.pdb
 
 # Unity generated folders
 Library/
