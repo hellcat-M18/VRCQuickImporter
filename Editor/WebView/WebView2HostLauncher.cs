@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
+using Microsoft.Win32;
 using UnityEditor;
 using UnityEngine;
 using VRCQuickImporter.Editor.Storage;
@@ -14,6 +16,11 @@ namespace VRCQuickImporter.Editor.WebView
     {
         private const string LoginUrl = "https://accounts.booth.pm/users/sign_in";
         private const string HostExeName = "VRCQuickImporter.WebView2Host.exe";
+        private const string WebView2BootstrapperUrl = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
+        private const string WebView2DownloadPageUrl = "https://developer.microsoft.com/en-us/microsoft-edge/webview2/";
+        private const string WebView2RuntimeRegistryKey = @"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+        private const string WebView2RuntimeRegistryKeyUser = @"Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+        private const string WebView2RuntimeRegistryValue = "pv";
 
         private static readonly List<Process> Processes = new List<Process>();
 
@@ -90,6 +97,11 @@ namespace VRCQuickImporter.Editor.WebView
 #if UNITY_EDITOR_WIN
             VRCQuickImporterPaths.EnsureDirectories();
 
+            if (!EnsureWebView2RuntimeAvailable())
+            {
+                return null;
+            }
+
             var hostExe = GetHostExePath();
             if (!File.Exists(hostExe))
             {
@@ -161,6 +173,138 @@ namespace VRCQuickImporter.Editor.WebView
             }
 
             Processes.Clear();
+        }
+
+        private static bool EnsureWebView2RuntimeAvailable()
+        {
+            if (IsWebView2RuntimeInstalled())
+            {
+                return true;
+            }
+
+            var result = EditorUtility.DisplayDialog(
+                "VRCQuickImporter",
+                "WebView2 Runtimeが見つかりません。\n\n" +
+                "Microsoft WebView2 Runtimeをインストールしますか？\n" +
+                "インターネット接続が必要です。約2MBをダウンロードします。",
+                "インストール",
+                "キャンセル");
+
+            if (!result)
+            {
+                return false;
+            }
+
+            var bootstrapperPath = Path.Combine(VRCQuickImporterPaths.CacheDirectory, "MicrosoftEdgeWebview2Setup.exe");
+
+            if (!TryDownloadWebView2Bootstrapper(bootstrapperPath))
+            {
+                EditorUtility.DisplayDialog(
+                    "VRCQuickImporter",
+                    "WebView2 Runtime Bootstrapperのダウンロードに失敗しました。\n\n" +
+                    "以下から手動でインストールしてください：\n" + WebView2DownloadPageUrl,
+                    "OK");
+                return false;
+            }
+
+            if (RunWebView2Bootstrapper(bootstrapperPath) && IsWebView2RuntimeInstalled())
+            {
+                return true;
+            }
+
+            EditorUtility.DisplayDialog(
+                "VRCQuickImporter",
+                "WebView2 Runtimeのインストールに失敗しました。\n\n" +
+                "以下から手動でインストールしてください：\n" + WebView2DownloadPageUrl,
+                "OK");
+            return false;
+        }
+
+        private static bool IsWebView2RuntimeInstalled()
+        {
+            try
+            {
+                using var hklmKey = Registry.LocalMachine.OpenSubKey(WebView2RuntimeRegistryKey);
+                if (IsValidWebView2Version(hklmKey))
+                {
+                    return true;
+                }
+
+                using var hkcuKey = Registry.CurrentUser.OpenSubKey(WebView2RuntimeRegistryKeyUser);
+                return IsValidWebView2Version(hkcuKey);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] WebView2 Runtime検出中に例外が発生しました: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool IsValidWebView2Version(RegistryKey key)
+        {
+            if (key == null) return false;
+            var value = key.GetValue(WebView2RuntimeRegistryValue) as string;
+            return !string.IsNullOrWhiteSpace(value) && !string.Equals(value, "0.0.0.0", StringComparison.Ordinal);
+        }
+
+        private static bool TryDownloadWebView2Bootstrapper(string destinationPath)
+        {
+            try
+            {
+                Debug.Log("[VRCQuickImporter] WebView2 Runtime Bootstrapperをダウンロード中: " + WebView2BootstrapperUrl);
+                using var client = new WebClient();
+                client.DownloadFile(WebView2BootstrapperUrl, destinationPath);
+                Debug.Log("[VRCQuickImporter] WebView2 Runtime Bootstrapperを保存しました: " + destinationPath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] WebView2 Runtime Bootstrapperのダウンロードに失敗しました: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool RunWebView2Bootstrapper(string bootstrapperPath)
+        {
+            try
+            {
+                Debug.Log("[VRCQuickImporter] WebView2 Runtimeをインストール中...");
+                using var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = bootstrapperPath,
+                    Arguments = "/silent /install",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WorkingDirectory = Path.GetDirectoryName(bootstrapperPath) ?? VRCQuickImporterPaths.CacheDirectory
+                });
+
+                if (process == null)
+                {
+                    Debug.LogWarning("[VRCQuickImporter] WebView2 Runtime Bootstrapperの起動に失敗しました。");
+                    return false;
+                }
+
+                if (!process.WaitForExit(60000))
+                {
+                    Debug.LogWarning("[VRCQuickImporter] WebView2 Runtimeのインストールがタイムアウトしました。");
+                    try { process.Kill(); } catch { }
+                    return false;
+                }
+
+                if (process.ExitCode != 0)
+                {
+                    Debug.LogWarning("[VRCQuickImporter] WebView2 Runtimeのインストールが終了コード " + process.ExitCode + " で失敗しました。");
+                    return false;
+                }
+
+                Debug.Log("[VRCQuickImporter] WebView2 Runtimeのインストールが完了しました。");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] WebView2 Runtimeのインストール中に例外が発生しました: " + ex.Message);
+                return false;
+            }
         }
 
         private static string GetHostExePath()
