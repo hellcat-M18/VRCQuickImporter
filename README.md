@@ -1,6 +1,8 @@
 # VRCQuickImporter
 
-BOOTHで購入した素材をUnity Editor内から検索・ダウンロード・インポートできるVRChat向けツールです。
+BOOTHで購入した素材をUnity Editor内から検索・ダウンロード・インポートできる、Unity Package対応のVRChat向けツールです。
+
+BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定後にリンクを更新予定）
 
 > **本ツールはBOOTH（pixiv株式会社）の非公式ツールです。**
 > 公式の提供物ではなく、利用は自己責任です。
@@ -17,21 +19,17 @@ BOOTHで購入した素材をUnity Editor内から検索・ダウンロード・
 - [WebView2 Evergreen Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
 - [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0)
 
-### 1. VPMリポジトリを追加
+### BOOTHで購入（おすすめ・300円）
 
-VCCまたはALCOMの「Add Repository」に以下URLを追加します。
+[BOOTH](https://hellcat.booth.pm/items/xxxxx)で購入後、ダウンロードした`.unitypackage`をUnityプロジェクトにドラッグ＆ドロップしてください。
 
-```text
-https://github.com/hellcat-M18/vrc-quick-importer
-```
+※GitHubでも無料公開しています。製作者を応援したい方はBOOTHからどうぞ。
 
-### 2. プロジェクトに追加
+### GitHubから（無料）
 
-VCC/ALCOMのパッケージ一覧から「VRCQuickImporter」をONにします。
+[Releases](https://github.com/hellcat-M18/VRCQuickImporter/releases)から最新の`.unitypackage`をダウンロードし、Unityプロジェクトにドラッグ＆ドロップしてください。
 
-または、リポジトリをcloneして`Packages/`以下に展開し、Package Managerでローカルpackageとして追加することもできます。
-
-### 3. 初回セットアップ
+### 初回セットアップ
 
 1. Unityメニュー `Tools > VRCQuickImporter > 開く` でウィンドウを開きます。
 2. 「BOOTHにログイン」を押し、WebView2で開いたBOOTH公式画面からログインします。

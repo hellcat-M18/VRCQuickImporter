@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+### Changed
+- 配布方式をVPMパッケージから`.unitypackage`（Assets直下配置）に変更
+- 導入方法: `Assets/VRCQuickImporter/` に配置、Tools メニューから起動
+
+### Removed
+- VPMパッケージマニフェスト（package.json）
+- VCC/ALCOMリポジトリ登録
+- GitHub Actionsリリースワークフロー（手動Export Packageに移行）
+
 ## 0.1.1
 
 ### Changed
