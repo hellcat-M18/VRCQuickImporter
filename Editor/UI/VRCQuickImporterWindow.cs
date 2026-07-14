@@ -66,8 +66,8 @@ namespace VRCQuickImporter.Editor.UI
             window.Show();
         }
 
-        [MenuItem("Tools/VRCQuickImporter/プロトタイプ/BOOTHログイン画面を開く")]
-        public static void OpenBoothLoginPrototype()
+        [MenuItem("Tools/VRCQuickImporter/BOOTHログイン画面を開く")]
+        public static void OpenBoothLogin()
         {
             WebView2HostLauncher.OpenLogin();
         }
@@ -106,7 +106,7 @@ namespace VRCQuickImporter.Editor.UI
             title.style.fontSize = 20;
             wrap.Add(title);
 
-            var subtitle = new Label("BOOTHライブラリの取得とUnityへの取り込みを支援します（プロトタイプ）");
+            var subtitle = new Label("BOOTHライブラリの取得とUnityへの取り込みを支援します");
             subtitle.style.marginTop = 2;
             wrap.Add(subtitle);
 

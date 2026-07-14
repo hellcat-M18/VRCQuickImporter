@@ -2,7 +2,7 @@
 
 ## Microsoft Edge WebView2 SDK
 
-This prototype includes files from the NuGet package `Microsoft.Web.WebView2`:
+This tool includes files from the NuGet package `Microsoft.Web.WebView2`:
 
 - `Microsoft.Web.WebView2.Core.dll`
 - `Microsoft.Web.WebView2.WinForms.dll`
