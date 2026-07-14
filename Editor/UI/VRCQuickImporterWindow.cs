@@ -57,19 +57,13 @@ namespace VRCQuickImporter.Editor.UI
         private const int GridPadding = 10;
         private const int MaxSmartSyncPages = 50;
 
-        [MenuItem("Tools/VRCQuickImporter/開く")]
+        [MenuItem("Tools/VRCQuickImporter")]
         public static void Open()
         {
             var window = GetWindow<VRCQuickImporterWindow>();
             window.titleContent = new GUIContent("VRCQuickImporter");
             window.minSize = new Vector2(780, 520);
             window.Show();
-        }
-
-        [MenuItem("Tools/VRCQuickImporter/BOOTHログイン画面を開く")]
-        public static void OpenBoothLogin()
-        {
-            WebView2HostLauncher.OpenLogin();
         }
 
         private void CreateGUI()
