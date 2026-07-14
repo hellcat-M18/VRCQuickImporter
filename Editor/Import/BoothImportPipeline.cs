@@ -154,18 +154,18 @@ namespace VRCQuickImporter.Editor.Import
                 var fi = new FileInfo(downloadPath);
                 Debug.Log($"[VRCQuickImporter] ダウンロード完了: {downloadPath} ({fi.Length} bytes)");
 
-                var downloadElapsed = (DateTime.UtcNow - startedAt).TotalSeconds;
-                if (downloadElapsed >= 10)
-                {
-                    var sizeMB = fi.Length / 1048576.0;
-                    BoothNotificationHelper.ShowNotification(
-                        "VRCQuickImporter",
-                        $"ダウンロード完了: {file.Name ?? "ファイル"} ({sizeMB:F1} MB, {downloadElapsed:F0}秒)");
-                }
-
                 try
                 {
                     ProcessDownloadedFile(downloadPath, product, file);
+
+                    var downloadElapsed = (DateTime.UtcNow - startedAt).TotalSeconds;
+                    if (downloadElapsed >= 10)
+                    {
+                        var sizeMB = fi.Length / 1048576.0;
+                        BoothNotificationHelper.ShowNotification(
+                            "VRCQuickImporter",
+                            $"ダウンロード＆インポート完了: {file.Name ?? "ファイル"} ({sizeMB:F1} MB, {downloadElapsed:F0}秒)");
+                    }
                 }
                 catch (Exception ex)
                 {
