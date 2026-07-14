@@ -268,7 +268,7 @@ namespace VRCQuickImporter.Editor.Import
             {
                 BoothNotificationHelper.ShowNotification(
                     "VRCQuickImporter",
-                    "unitypackageのインポートが完了しました");
+                    $"{Path.GetFileName(packageName)}のインポートが完了しました");
             }
         }
 
@@ -394,14 +394,12 @@ namespace VRCQuickImporter.Editor.Import
             AssetDatabase.Refresh();
             Debug.Log("[VRCQuickImporter] Assets配下に展開しました: " + targetDir);
 
-            EditorUtility.DisplayDialog(
+            var relativePath = "Assets/BOOTH/" + folderName;
+            BoothNotificationHelper.ShowNotification(
                 "VRCQuickImporter",
-                $"「{folderName}」を Assets/BOOTH/{folderName}/ に展開しました。\n" +
-                $"AssetDatabaseを更新しました。",
-                "OK");
+                $"「{folderName}」を {relativePath} に展開しました");
 
             // Projectウィンドウで開く
-            var relativePath = "Assets/BOOTH/" + folderName;
             var obj = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(relativePath);
             if (obj != null)
             {
@@ -409,9 +407,11 @@ namespace VRCQuickImporter.Editor.Import
                 EditorGUIUtility.PingObject(obj);
             }
 
-            BoothNotificationHelper.ShowNotification(
+            EditorUtility.DisplayDialog(
                 "VRCQuickImporter",
-                $"「{folderName}」を {relativePath} に展開しました");
+                $"「{folderName}」を Assets/BOOTH/{folderName}/ に展開しました。\n" +
+                $"AssetDatabaseを更新しました。",
+                "OK");
 
         }
 
