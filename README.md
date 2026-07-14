@@ -6,7 +6,7 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 
 > **本ツールはBOOTH（pixiv株式会社）の非公式ツールです。**
 > 公式の提供物ではなく、利用は自己責任です。
-> BOOTHの[利用規約](https://policies.pixiv.net/)・[ガイドライン](https://booth.pm/guidelines)を尊重し、常識的な範囲でご利用ください。
+> 過剰なリクエスト・アクセスが発生しないよう設計してはいますが、予めBOOTHの[利用規約](https://policies.pixiv.net/)・[ガイドライン](https://booth.pm/guidelines)を念頭に置き、常識的な範囲でご利用ください。
 
 ---
 
@@ -19,29 +19,33 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 - [WebView2 Evergreen Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
 - [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0)
 
-### BOOTHで購入（おすすめ・300円）
+### BOOTHで購入（300円）
 
-[BOOTH](https://hellcat.booth.pm/items/xxxxx)で購入後、ダウンロードした`.unitypackage`をUnityプロジェクトにドラッグ＆ドロップしてください。
+[BOOTH](https://hellcat.booth.pm/items/xxxxx)で購入後、ダウンロードした`.unitypackage`をダブルクリックして導入してください。
 
-※GitHubでも無料公開しています。製作者を応援したい方はBOOTHからどうぞ。
+※GitHubでも無料公開しています。**製作者を応援したい方はBOOTHからどうぞ。**
 
 ### GitHubから（無料）
 
-[Releases](https://github.com/hellcat-M18/VRCQuickImporter/releases)から最新の`.unitypackage`をダウンロードし、Unityプロジェクトにドラッグ＆ドロップしてください。
+準備中
 
 ### 初回セットアップ
 
-1. Unityメニュー `Tools > VRCQuickImporter > 開く` でウィンドウを開きます。
+1. Unityメニュー `Tools > VRCQuickImporter` でウィンドウを開きます。
 2. 「BOOTHにログイン」を押し、WebView2で開いたBOOTH公式画面からログインします。
    - 本ツールはBOOTHのパスワードを保存・送信しません。認証はBOOTH公式ページ上で行われます。
 3. 「BOOTHと同期」を押すと、初回の確認ダイアログが表示されます。同意するとライブラリ全ページの取得を開始します。
 4. 同期完了後、カードグリッドに購入済み商品が表示されます。
 
-以降はBOOTHへの再ログイン不要です。セッション情報はプロジェクト内の専用プロファイルに保存されます。
+以降は原則としてBOOTHへの再ログインが不要になります。セッション情報はプロジェクト内の専用プロファイルに保存されます。
 
 ---
 
 ## 通常の使い方
+
+### 購入履歴をBoothと同期する
+
+「BOOTHと同期」を押すと、前回の同期以降の新しい商品データを追加取得します。新しいページが空になった時点で自動停止します。
 
 ### 商品を探す
 
@@ -59,9 +63,6 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 - `.unitypackage`が複数 → どのファイルをインポートするか確認
 - `.unitypackage`なし → `Assets/BOOTH/{zip名}/` に展開
 
-### 増分同期
-
-「BOOTHと同期」を押すと、前回の同期以降の新しいページを追加取得します。新しいページが空になった時点で自動停止します。
 
 ---
 
@@ -75,7 +76,8 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 
 ### 完全リフレッシュ
 
-キャッシュを一旦破棄し、BOOTHライブラリを全件再取得します。詳細設定内の「同期のメンテナンス」から実行できます。
+ライブラリデータのキャッシュを一旦破棄し、BOOTHライブラリを全件再取得します。詳細設定内の「同期のメンテナンス」から実行できます。
+アクセス集中を回避するため、実行には数分ほどかかります。
 
 ### データ削除/リセット
 
@@ -119,10 +121,10 @@ BOOTH
 アクセス制御:
 
 - BOOTHライブラリページへのアクセスは**最低5秒の間隔**を空けます
-- 並列アクセスは行いません
+- 並列アクセス・確認無しの自動アクセスは行いません
 - 同期時は画像・メディア・フォントリソースをブロックし（204 No Content）、BOOTHサーバへの負荷を抑えます。JavaScript/CSSはブロックしません
-- 増分同期では、新しいページが空になった時点で自動停止します
-- 完全リフレッシュはユーザーが明示的に実行したときのみ行われます
+- 増分同期では、内容が既存キャッシュと被った時点で取得を停止します
+- 完全リフレッシュはユーザーが明示的に実行したときにのみ行われます
 
 ### セッション管理
 
