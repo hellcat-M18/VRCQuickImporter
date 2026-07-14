@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1
+
+### Changed
+- リポジトリ構成をVPM標準形（パッケージルート＝リポジトリルート）に移行
+- README全面整備（導入方法・使い方・技術詳細・免責事項）
+
+### Added
+- WebView2 Runtime未検出時にMicrosoft公式Bootstrapperをダウンロード・サイレントインストールする機能
+
+### Removed
+- ROADMAP.mdとAGENTS/ディレクトリをリポジトリ追跡から除外（.gitignore）
+
 ## 0.1.0
 
 ### Added
