@@ -154,6 +154,15 @@ namespace VRCQuickImporter.Editor.Import
                 var fi = new FileInfo(downloadPath);
                 Debug.Log($"[VRCQuickImporter] ダウンロード完了: {downloadPath} ({fi.Length} bytes)");
 
+                var elapsed = (DateTime.UtcNow - startedAt).TotalSeconds;
+                if (elapsed >= 10)
+                {
+                    var sizeMB = fi.Length / 1048576.0;
+                    BoothNotificationHelper.ShowNotification(
+                        "VRCQuickImporter",
+                        $"ダウンロード完了: {file.Name ?? "ファイル"} ({sizeMB:F1} MB, {elapsed:F0}秒)");
+                }
+
                 try
                 {
                     ProcessDownloadedFile(downloadPath, product, file);
