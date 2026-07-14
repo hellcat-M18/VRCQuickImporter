@@ -236,49 +236,97 @@ namespace VRCQuickImporter.Editor.Import
         }
 
         /// <summary>
-        /// 複数のunitypackageがある場合、ユーザーに選択させる。
+        /// 複数のunitypackageがある場合、インポート方法をユーザーに選択させる。
         /// </summary>
         private static void SelectAndImportUnityPackages(string[] packages, string productName)
         {
-            var displayNames = packages.Select(p => Path.GetFileName(p)).ToArray();
-            var message = $"「{productName}」に複数のunitypackageが含まれています。\n\n" +
-                           "インポートするものを選択してください（複数選択可）:";
-            var options = displayNames;
+            var choice = EditorUtility.DisplayDialogComplex(
+                "VRCQuickImporter - unitypackage選択",
+                $"「{productName}」に{packages.Length}個のunitypackageが含まれています。\n\n" +
+                "すべてインポートするか、ファイルを選択してインポートできます。",
+                "すべてインポート",
+                "キャンセル",
+                "選択してインポート");
 
-            // EditorUtility.DisplayDialogでは複数選択できないので、
-            // 1つずつダイアログで確認する
-            var toImport = new List<string>();
-            foreach (var pkg in packages)
+            if (choice == 0)
             {
-                var name = Path.GetFileName(pkg);
-                var ok = EditorUtility.DisplayDialog(
-                    "VRCQuickImporter - unitypackage選択",
-                    $"「{productName}」に複数のunitypackageが含まれています。\n\n" +
-                    $"{name}\n\nこのファイルをインポートしますか？\n" +
-                    $"({toImport.Count + 1}/{packages.Length}個目)",
-                    "インポート",
-                    "スキップ");
-
-                if (ok)
+                foreach (var pkg in packages)
                 {
-                    toImport.Add(pkg);
+                    ImportUnityPackage(pkg);
                 }
-            }
 
-            if (toImport.Count == 0)
+                BoothNotificationHelper.ShowNotification(
+                    "VRCQuickImporter",
+                    $"unitypackage {packages.Length}個のインポートが完了しました");
+            }
+            else if (choice == 2)
             {
-                Debug.Log("[VRCQuickImporter] インポートがスキップされました。");
-                return;
+                SelectWindow.Open(packages, productName);
             }
+        }
 
-            foreach (var pkg in toImport)
+        private sealed class SelectWindow : EditorWindow
+        {
+            private string[] _packages = Array.Empty<string>();
+            private bool[] _selected = Array.Empty<bool>();
+            private string _productName = string.Empty;
+            private Vector2 _scrollPosition;
+
+            public static void Open(string[] packages, string productName)
             {
-                ImportUnityPackage(pkg);
+                var window = GetWindow<SelectWindow>(true, "インポートするファイルを選択", true);
+                window._packages = packages ?? Array.Empty<string>();
+                window._selected = Enumerable.Repeat(true, window._packages.Length).ToArray();
+                window._productName = productName ?? string.Empty;
+
+                var height = Mathf.Min(400, 140 + window._packages.Length * 24);
+                window.minSize = new Vector2(400, 160);
+                window.position = new Rect(window.position.x, window.position.y, 400, height);
             }
 
-            BoothNotificationHelper.ShowNotification(
-                "VRCQuickImporter",
-                $"unitypackage {toImport.Count}個のインポートが完了しました");
+            private void OnGUI()
+            {
+                EditorGUILayout.LabelField("インポートするファイルを選択", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField($"「{_productName}」", EditorStyles.wordWrappedLabel);
+                EditorGUILayout.Space(6);
+
+                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition, GUILayout.ExpandHeight(true));
+                for (var index = 0; index < _packages.Length; index++)
+                {
+                    var fileName = Path.GetFileName(_packages[index]);
+                    _selected[index] = EditorGUILayout.ToggleLeft(fileName, _selected[index]);
+                }
+                EditorGUILayout.EndScrollView();
+
+                EditorGUILayout.Space(8);
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+
+                var selectedCount = _selected.Count(selected => selected);
+                EditorGUI.BeginDisabledGroup(selectedCount == 0);
+                if (GUILayout.Button("インポート", GUILayout.Width(110)))
+                {
+                    var toImport = _packages.Where((_, index) => _selected[index]).ToArray();
+                    Close();
+
+                    foreach (var pkg in toImport)
+                    {
+                        ImportUnityPackage(pkg);
+                    }
+
+                    BoothNotificationHelper.ShowNotification(
+                        "VRCQuickImporter",
+                        $"unitypackage {toImport.Length}個のインポートが完了しました");
+                }
+                EditorGUI.EndDisabledGroup();
+
+                if (GUILayout.Button("キャンセル", GUILayout.Width(90)))
+                {
+                    Close();
+                }
+
+                EditorGUILayout.EndHorizontal();
+            }
         }
 
         /// <summary>
