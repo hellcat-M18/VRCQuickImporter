@@ -9,15 +9,22 @@ namespace VRCQuickImporter.Editor.Import
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr LoadIcon(IntPtr hInstance, IntPtr lpIconName);
+
         [DllImport("shell32.dll", CharSet = CharSet.Auto)]
         private static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATA lpdata);
 
         private const uint NIM_ADD = 0;
         private const uint NIM_MODIFY = 1;
         private const uint NIM_DELETE = 2;
+        private const uint NIF_ICON = 0x2;
         private const uint NIF_INFO = 0x10;
         private const uint NIIF_INFO = 1;
         private const uint NIIF_NONE = 0;
+
+        private static readonly IntPtr IDI_APPLICATION = new IntPtr(32512);
+        private static readonly IntPtr IDI_INFORMATION = new IntPtr(32516);
 
         // 通知を受け取る用のカスタムウィンドウメッセージ
         private const uint WM_TRAYICON = 0x400;
@@ -53,7 +60,8 @@ namespace VRCQuickImporter.Editor.Import
                 cbSize = (uint)Marshal.SizeOf(typeof(NOTIFYICONDATA)),
                 hWnd = hwnd,
                 uID = 1,
-                uFlags = NIF_INFO,
+                uFlags = NIF_INFO | NIF_ICON,
+                hIcon = LoadIcon(IntPtr.Zero, IDI_INFORMATION),
                 szInfoTitle = title,
                 szInfo = message,
                 uTimeoutOrVersion = 5000,    // 5秒
