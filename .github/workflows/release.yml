@@ -17,8 +17,8 @@ jobs:
       - name: Set version variables
         id: vars
         run: |
-          PKG_NAME="$(jq -r '.name' Packages/tool.hellcat.vrc-quick-importer/package.json)"
-          VERSION="$(jq -r '.version' Packages/tool.hellcat.vrc-quick-importer/package.json)"
+          PKG_NAME="$(jq -r '.name' package.json)"
+          VERSION="$(jq -r '.version' package.json)"
           TAG="v${VERSION}"
           ZIP_NAME="${PKG_NAME}-${VERSION}.zip"
           ZIP_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${ZIP_NAME}"
@@ -30,13 +30,12 @@ jobs:
       - name: Update package.json url
         run: |
           jq --arg url "${{ steps.vars.outputs.zip_url }}" '.url = $url' \
-            Packages/tool.hellcat.vrc-quick-importer/package.json > tmp.json
-          mv tmp.json Packages/tool.hellcat.vrc-quick-importer/package.json
+            package.json > tmp.json
+          mv tmp.json package.json
 
       - name: Build zip
         run: |
-          cd Packages/tool.hellcat.vrc-quick-importer
-          zip -r "../../${{ steps.vars.outputs.zip_name }}" . \
+          zip -r "${{ steps.vars.outputs.zip_name }}" . \
             -x ".git/*" \
             -x ".github/*" \
             -x "AGENTS/*" \

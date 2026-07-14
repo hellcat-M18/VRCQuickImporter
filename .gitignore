@@ -28,3 +28,15 @@ instant-meshes/
 vpm-package-template/
 lace-handoff-prompt.md
 plan.md
+
+# Package-root agent/private planning notes
+/AGENTS/
+/AGENTS.meta
+/ROADMAP.md
+/ROADMAP.md.meta
+
+# Package-root local build outputs and debug symbols for helper tools
+/Tools~/WebView2Host/bin/
+/Tools~/WebView2Host/obj/
+/Tools~/WebView2Host/publish/
+*.pdb
