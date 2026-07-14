@@ -17,6 +17,8 @@ namespace VRCQuickImporter.Editor.Import
     internal static class BoothImportPipeline
     {
         private const int DownloadTimeoutSeconds = 180;
+        private static int _pendingImportCount;
+        private static bool _importHandlerRegistered;
 
         /// <summary>
         /// 指定した商品の指定ファイルをダウンロードしてインポートする。
@@ -230,9 +232,63 @@ namespace VRCQuickImporter.Editor.Import
         private static void ImportUnityPackage(string path)
         {
             Debug.Log("[VRCQuickImporter] unitypackage をインポート: " + path);
-            AssetDatabase.ImportPackage(path, interactive: true);
 
-            BoothNotificationHelper.ShowNotification("VRCQuickImporter", "unitypackageのインポートが完了しました");
+            _pendingImportCount++;
+            RegisterImportHandlers();
+
+            try
+            {
+                AssetDatabase.ImportPackage(path, interactive: true);
+            }
+            catch
+            {
+                CompletePendingImport();
+                throw;
+            }
+        }
+
+        private static void RegisterImportHandlers()
+        {
+            if (_importHandlerRegistered)
+            {
+                return;
+            }
+
+            AssetDatabase.importPackageCompleted += OnImportPackageCompleted;
+            AssetDatabase.importPackageCancelled += OnImportPackageCancelled;
+            _importHandlerRegistered = true;
+        }
+
+        private static void OnImportPackageCompleted(string packageName)
+        {
+            Debug.Log($"[VRCQuickImporter] インポート完了: {packageName}");
+            CompletePendingImport();
+
+            if (_pendingImportCount == 0)
+            {
+                BoothNotificationHelper.ShowNotification(
+                    "VRCQuickImporter",
+                    "unitypackageのインポートが完了しました");
+            }
+        }
+
+        private static void OnImportPackageCancelled(string packageName)
+        {
+            Debug.Log($"[VRCQuickImporter] インポートをキャンセル: {packageName}");
+            CompletePendingImport();
+        }
+
+        private static void CompletePendingImport()
+        {
+            _pendingImportCount = Math.Max(0, _pendingImportCount - 1);
+            if (_pendingImportCount != 0 || !_importHandlerRegistered)
+            {
+                return;
+            }
+
+            AssetDatabase.importPackageCompleted -= OnImportPackageCompleted;
+            AssetDatabase.importPackageCancelled -= OnImportPackageCancelled;
+            _importHandlerRegistered = false;
         }
 
         /// <summary>
@@ -255,9 +311,6 @@ namespace VRCQuickImporter.Editor.Import
                     ImportUnityPackage(pkg);
                 }
 
-                BoothNotificationHelper.ShowNotification(
-                    "VRCQuickImporter",
-                    $"unitypackage {packages.Length}個のインポートが完了しました");
             }
             else if (choice == 2)
             {
@@ -314,9 +367,6 @@ namespace VRCQuickImporter.Editor.Import
                         ImportUnityPackage(pkg);
                     }
 
-                    BoothNotificationHelper.ShowNotification(
-                        "VRCQuickImporter",
-                        $"unitypackage {toImport.Length}個のインポートが完了しました");
                 }
                 EditorGUI.EndDisabledGroup();
 
@@ -362,6 +412,7 @@ namespace VRCQuickImporter.Editor.Import
             BoothNotificationHelper.ShowNotification(
                 "VRCQuickImporter",
                 $"「{folderName}」を {relativePath} に展開しました");
+
         }
 
         private static string SanitizeForFolderName(string name)
