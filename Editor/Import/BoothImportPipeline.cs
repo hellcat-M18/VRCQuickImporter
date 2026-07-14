@@ -18,6 +18,7 @@ namespace VRCQuickImporter.Editor.Import
     {
         private const int DownloadTimeoutSeconds = 180;
         private static DateTime _activeDownloadStartedAt;
+        private static bool _importPackageHandlerRegistered;
 
         /// <summary>
         /// 指定した商品の指定ファイルをダウンロードしてインポートする。
@@ -196,16 +197,19 @@ namespace VRCQuickImporter.Editor.Import
 
                 ExtractZip(filePath, extractDir);
 
-                var totalElapsed = (DateTime.UtcNow - _activeDownloadStartedAt).TotalSeconds;
-                if (totalElapsed >= 10)
-                {
-                    var sizeMB = new FileInfo(filePath).Length / 1048576.0;
-                    BoothNotificationHelper.ShowNotification(
-                        "VRCQuickImporter",
-                        $"zipの展開が完了しました ({sizeMB:F1} MB, {totalElapsed:F0}秒)");
-                }
-
                 var unityPackages = Directory.GetFiles(extractDir, "*.unitypackage", SearchOption.AllDirectories);
+
+                if (unityPackages.Length > 0)
+                {
+                    var totalElapsed = (DateTime.UtcNow - _activeDownloadStartedAt).TotalSeconds;
+                    if (totalElapsed >= 10)
+                    {
+                        var sizeMB = new FileInfo(filePath).Length / 1048576.0;
+                        BoothNotificationHelper.ShowNotification(
+                            "VRCQuickImporter",
+                            $"zipの展開が完了しました ({sizeMB:F1} MB, {totalElapsed:F0}秒)");
+                    }
+                }
 
                 if (unityPackages.Length == 1)
                 {
@@ -241,7 +245,21 @@ namespace VRCQuickImporter.Editor.Import
         private static void ImportUnityPackage(string path)
         {
             Debug.Log("[VRCQuickImporter] unitypackage をインポート: " + path);
+
+            if (!_importPackageHandlerRegistered)
+            {
+                AssetDatabase.importPackageCompleted += OnImportPackageCompleted;
+                _importPackageHandlerRegistered = true;
+            }
+
             AssetDatabase.ImportPackage(path, interactive: true);
+        }
+
+        private static void OnImportPackageCompleted(string packageName)
+        {
+            BoothNotificationHelper.ShowNotification(
+                "VRCQuickImporter",
+                $"{Path.GetFileName(packageName)}のインポートが完了しました");
         }
 
         /// <summary>
