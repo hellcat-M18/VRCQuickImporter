@@ -1,7 +1,9 @@
 {
   "name": "tool.hellcat.vrc-quick-importer.editor",
   "rootNamespace": "VRCQuickImporter.Editor",
-  "references": [],
+  "references": [
+    "System.Windows.Forms"
+  ],
   "includePlatforms": [
     "Editor"
   ],
