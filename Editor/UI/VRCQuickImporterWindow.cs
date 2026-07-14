@@ -419,6 +419,7 @@ namespace VRCQuickImporter.Editor.UI
             searchField.name = "product-name-search-field";
             searchField.tooltip = "ローカルJSONキャッシュ内の商品名だけを検索します。BOOTHへの追加アクセスは行いません。";
             searchField.style.flexGrow = 1;
+            searchField.style.minHeight = 28;
             BoothFontProvider.Apply(searchField, FontStyle.Normal);
             core.Add(searchField);
 

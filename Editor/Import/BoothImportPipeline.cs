@@ -231,6 +231,9 @@ namespace VRCQuickImporter.Editor.Import
         {
             Debug.Log("[VRCQuickImporter] unitypackage をインポート: " + path);
             AssetDatabase.ImportPackage(path, interactive: true);
+
+            var window = EditorWindow.GetWindow<VRCQuickImporter.Editor.UI.VRCQuickImporterWindow>();
+            window.ShowNotification(new GUIContent("✅ unitypackageのインポートが完了しました"));
         }
 
         /// <summary>
@@ -273,6 +276,9 @@ namespace VRCQuickImporter.Editor.Import
             {
                 ImportUnityPackage(pkg);
             }
+
+            var window = EditorWindow.GetWindow<VRCQuickImporter.Editor.UI.VRCQuickImporterWindow>();
+            window.ShowNotification(new GUIContent($"✅ unitypackage {toImport.Count}個のインポートが完了しました"));
         }
 
         /// <summary>
@@ -295,6 +301,18 @@ namespace VRCQuickImporter.Editor.Import
                 $"「{folderName}」を Assets/BOOTH/{folderName}/ に展開しました。\n" +
                 $"AssetDatabaseを更新しました。",
                 "OK");
+
+            // Projectウィンドウで開く
+            var relativePath = "Assets/BOOTH/" + folderName;
+            var obj = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(relativePath);
+            if (obj != null)
+            {
+                Selection.activeObject = obj;
+                EditorGUIUtility.PingObject(obj);
+            }
+
+            var window = EditorWindow.GetWindow<VRCQuickImporter.Editor.UI.VRCQuickImporterWindow>();
+            window.ShowNotification(new GUIContent($"✅ 「{folderName}」を {relativePath} に展開しました"));
         }
 
         private static string SanitizeForFolderName(string name)
