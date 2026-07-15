@@ -342,7 +342,7 @@ namespace VRCQuickImporter.Editor.UI
                     text = "商品ページを開く"
                 };
                 StyleSubButton(openPageButton);
-                openPageButton.tooltip = "BOOTHの商品ページをブラウザで開きます";
+                openPageButton.tooltip = "BOOTHの商品ページをブラウザで開きます（Ctrl+クリックでバックグラウンドで開きます）";
                 openPageButton.style.marginTop = VRCQuickImporterTheme.SpaceMd;
                 openPageButton.style.width = new Length(100, LengthUnit.Percent);
                 row.Add(openPageButton);

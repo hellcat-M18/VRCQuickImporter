@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -1272,10 +1273,27 @@ namespace VRCQuickImporter.Editor.UI
             BoothImportPipeline.StartImport(product, file);
         }
 
+        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr ShellExecute(
+            IntPtr hwnd,
+            string lpOperation,
+            string lpFile,
+            string lpParameters,
+            string lpDirectory,
+            int nShowCmd);
+
+        private const int SW_SHOWNOACTIVATE = 4;
+
         private static void OpenProductPage(BoothProduct product)
         {
             if (string.IsNullOrEmpty(product.ProductUrl))
             {
+                return;
+            }
+
+            if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+            {
+                ShellExecute(IntPtr.Zero, "open", product.ProductUrl, null, null, SW_SHOWNOACTIVATE);
                 return;
             }
 
