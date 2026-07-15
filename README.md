@@ -26,7 +26,8 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 
 ### GitHubから（無料）
 
-準備中
+1. Releasesから導入したいバージョンを選択し、zipファイルをダウンロード
+2. ダウンロードしたzipファイルを展開し、UnityプロジェクトのAssets直下に配置
 
 ### 初回セットアップ
 
