@@ -16,8 +16,7 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 
 - Windows
 - Unity 2022.3以降（推奨: 2022.3.22f1）
-- [WebView2 Evergreen Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
-- [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0)
+- WebView2 Evergreen Runtime（未導入時は自動インストール）
 
 ### BOOTHで購入（300円）
 
