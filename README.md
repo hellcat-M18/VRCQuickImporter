@@ -1,6 +1,6 @@
 # VRCQuickImporter
 
-BOOTHで購入した素材をUnity Editor内から検索・ダウンロード・インポートできる、Unity Package対応のVRChat向けツールです。
+BOOTHで購入したアセットをUnity Editor内から管理できるVRChat向けエディタ拡張ツールです。
 
 BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定後にリンクを更新予定）
 
