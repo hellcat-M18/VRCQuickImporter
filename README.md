@@ -4,7 +4,7 @@ BOOTHで購入したアセットをUnity Editor内から管理できるVRChat向
 
 BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定後にリンクを更新予定）
 
-> **本ツールはBOOTH（pixiv株式会社）の非公式ツールです。**
+> **本ツールはBOOTHの非公式ツールです。**
 > 公式の提供物ではなく、利用は自己責任です。
 > 過剰なリクエスト・アクセスが発生しないよう設計してはいますが、予めBOOTHの[利用規約](https://policies.pixiv.net/)・[ガイドライン](https://booth.pm/guidelines)を念頭に置き、常識的な範囲でご利用ください。
 
