@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - name: Verify VERSION file
+        run: |
+          EXPECTED="${{ env.VERSION }}"
+          ACTUAL=$(cat VERSION)
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "ERROR: Tag v$EXPECTED but VERSION file says $ACTUAL"
+            exit 1
+          fi
+          echo "Version $EXPECTED OK"
+
+      - name: Create ZIP
+        run: |
+          git archive --format=zip \
+            --prefix=VRCQuickImporter/ \
+            --output=VRCQuickImporter.zip \
+            HEAD
+
+      - name: Extract changelog
+        run: |
+          awk '/^## ${{ env.VERSION }}/{flag=1; next} /^## /{flag=0} flag' CHANGELOG.md > /tmp/release-body.md
+          cat /tmp/release-body.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: v${{ env.VERSION }}
+          body_path: /tmp/release-body.md
+          files: VRCQuickImporter.zip
+          draft: false
+          fail_on_unmatched_files: true
