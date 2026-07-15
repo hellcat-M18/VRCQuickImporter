@@ -1,8 +1,19 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-namespace VRCQuickImporter.WebView2Host;
+namespace VRCQuickImporter.WebView2Host
+{
 
 internal static class Program
 {
@@ -38,8 +49,8 @@ internal sealed class BrowserForm : Form
     private readonly Button _syncButton;
     private bool _autoSyncAttempted;
     private bool _syncRunning;
-    private CoreWebView2DownloadOperation? _currentDownload;
-    private TaskCompletionSource<bool>? _downloadCompletionSource;
+    private CoreWebView2DownloadOperation _currentDownload;
+    private TaskCompletionSource<bool> _downloadCompletionSource;
     private int _blockedLightweightResourceCount;
 
     public BrowserForm(HostOptions options)
@@ -284,7 +295,7 @@ internal sealed class BrowserForm : Form
         var url = _webView.Source?.ToString() ?? string.Empty;
         if (!IsBoothLibraryUrl(url))
         {
-            if (url.Contains("sign_in", StringComparison.OrdinalIgnoreCase))
+            if (url.IndexOf("sign_in", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 _statusLabel.Text = "BOOTHにログインしてください。ログイン後に「同期」を押してください。";
             }
@@ -342,14 +353,14 @@ internal sealed class BrowserForm : Form
 
             // アトミック書き込み: テンポラリファイルに書き込んでからリネーム
             var tmpPath = outputPath + ".tmp";
-            await File.WriteAllTextAsync(tmpPath, formatted);
+            await WriteAllTextAsync(tmpPath, formatted);
             if (File.Exists(outputPath))
             {
                 File.Delete(outputPath);
             }
             File.Move(tmpPath, outputPath);
 
-            await File.WriteAllTextAsync(Path.Combine(_options.LogDirectory, "last-library-sync.raw.json"), formatted);
+            await WriteAllTextAsync(Path.Combine(_options.LogDirectory, "last-library-sync.raw.json"), formatted);
             await SaveCurrentHtmlAsync($"last-library-page-{page:D3}-html.json.txt", showStatus: false);
 
             var count = document.RootElement.TryGetProperty("Products", out var products) && products.ValueKind == JsonValueKind.Array
@@ -361,7 +372,7 @@ internal sealed class BrowserForm : Form
             if (_options.ExitAfterSync)
             {
                 await Task.Delay(1000);
-                BeginInvoke(Close);
+                BeginInvoke(new MethodInvoker(Close));
             }
         }
         catch (Exception ex)
@@ -393,7 +404,7 @@ internal sealed class BrowserForm : Form
         {
             if (File.Exists(_options.RateLimitFilePath))
             {
-                var text = await File.ReadAllTextAsync(_options.RateLimitFilePath);
+                var text = await ReadAllTextAsync(_options.RateLimitFilePath);
                 if (DateTimeOffset.TryParse(text.Trim(), out var lastAccessUtc))
                 {
                     var nextAllowedUtc = lastAccessUtc.ToUniversalTime().AddMilliseconds(_options.MinAccessIntervalMs);
@@ -407,7 +418,7 @@ internal sealed class BrowserForm : Form
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(_options.RateLimitFilePath) ?? _options.LogDirectory);
-            await File.WriteAllTextAsync(_options.RateLimitFilePath, DateTimeOffset.UtcNow.ToString("o"));
+            await WriteAllTextAsync(_options.RateLimitFilePath, DateTimeOffset.UtcNow.ToString("o"));
         }
         catch
         {
@@ -417,15 +428,15 @@ internal sealed class BrowserForm : Form
 
     private async Task WaitForLibraryNavigationAsync()
     {
-        var tcs = new TaskCompletionSource();
+        var tcs = new TaskCompletionSource<bool>();
         var completed = false;
 
-        void Handler(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+        void Handler(object sender, CoreWebView2NavigationCompletedEventArgs e)
         {
             if (completed) return;
             completed = true;
             _webView.CoreWebView2.NavigationCompleted -= Handler;
-            tcs.TrySetResult();
+            tcs.TrySetResult(true);
         }
 
         if (_webView.CoreWebView2 != null)
@@ -434,7 +445,7 @@ internal sealed class BrowserForm : Form
         }
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using (cts.Token.Register(() => tcs.TrySetCanceled()))
+        using (cts.Token.Register(() => tcs.TrySetCanceled()))
         {
             await tcs.Task;
         }
@@ -454,7 +465,7 @@ internal sealed class BrowserForm : Form
         // WebView2がダウンロードを開始するのを待つ（NavigationCompleted後にダウンロードがトリガされる）
         // DownloadStartingイベントで_downloadCompletionSourceが設定される
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        await using (cts.Token.Register(() => _downloadCompletionSource.TrySetCanceled()))
+        using (cts.Token.Register(() => _downloadCompletionSource.TrySetCanceled()))
         {
             try
             {
@@ -468,10 +479,10 @@ internal sealed class BrowserForm : Form
         }
 
         await Task.Delay(500);
-        BeginInvoke(Close);
+        BeginInvoke(new MethodInvoker(Close));
     }
 
-    private void OnDownloadStateChanged(object? sender, object e)
+    private void OnDownloadStateChanged(object sender, object e)
     {
         if (_currentDownload == null) return;
 
@@ -481,18 +492,18 @@ internal sealed class BrowserForm : Form
             _statusLabel.Text = "ダウンロード完了: " + _options.OutputPath;
             WriteProgress(100, 0, 100, "completed");
             _downloadCompletionSource?.TrySetResult(true);
-            BeginInvoke(Close);
+            BeginInvoke(new MethodInvoker(Close));
         }
         else if (state == CoreWebView2DownloadState.Interrupted)
         {
             _statusLabel.Text = "ダウンロードが中断されました。";
             WriteProgress(0, 0, 0, "interrupted");
             _downloadCompletionSource?.TrySetResult(false);
-            BeginInvoke(Close);
+            BeginInvoke(new MethodInvoker(Close));
         }
     }
 
-    private void OnDownloadBytesReceivedChanged(object? sender, object e)
+    private void OnDownloadBytesReceivedChanged(object sender, object e)
     {
         if (_currentDownload == null) return;
         try
@@ -533,7 +544,7 @@ internal sealed class BrowserForm : Form
 
     private static bool IsBoothLibraryUrl(string url)
     {
-        return url.Contains("accounts.booth.pm/library", StringComparison.OrdinalIgnoreCase);
+        return url.IndexOf("accounts.booth.pm/library", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private void GoBack()
@@ -612,7 +623,7 @@ internal sealed class BrowserForm : Form
 
             var htmlJson = await _webView.CoreWebView2.ExecuteScriptAsync("document.documentElement.outerHTML");
             var filePath = Path.Combine(_options.LogDirectory, fileName);
-            await File.WriteAllTextAsync(filePath, htmlJson);
+            await WriteAllTextAsync(filePath, htmlJson);
 
             var meta = new
             {
@@ -621,7 +632,7 @@ internal sealed class BrowserForm : Form
                 htmlJsonLength = htmlJson.Length,
                 filePath
             };
-            await File.WriteAllTextAsync(
+            await WriteAllTextAsync(
                 Path.Combine(_options.LogDirectory, Path.GetFileNameWithoutExtension(fileName) + ".meta.json"),
                 JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
 
@@ -635,6 +646,16 @@ internal sealed class BrowserForm : Form
             _statusLabel.Text = "HTML保存失敗: " + ex.Message;
             MessageBox.Show(this, ex.ToString(), "HTML保存失敗", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    private static Task<string> ReadAllTextAsync(string path)
+    {
+        return Task.Run(() => File.ReadAllText(path));
+    }
+
+    private static Task WriteAllTextAsync(string path, string contents)
+    {
+        return Task.Run(() => File.WriteAllText(path, contents));
     }
 
     private static string MakeUniquePath(string path)
@@ -759,21 +780,21 @@ internal sealed class BrowserForm : Form
 ";
 }
 
-internal sealed class HostOptions
+class HostOptions
 {
-    public string ProfileDirectory { get; private init; } = Path.Combine(Path.GetTempPath(), "VRCQuickImporter", "webview-profile");
-    public string LogDirectory { get; private init; } = Path.Combine(Path.GetTempPath(), "VRCQuickImporter", "logs");
-    public string DownloadDirectory { get; private init; } = Path.Combine(Path.GetTempPath(), "VRCQuickImporter", "downloads");
-    public string InitialUrl { get; private init; } = "https://accounts.booth.pm/users/sign_in";
-    public string OutputPath { get; private init; } = string.Empty;
-    public bool SyncLibrary { get; private init; }
-    public bool ExitAfterSync { get; private init; }
-    public bool Headless { get; private init; }
-    public int Page { get; private init; } = 1;
-    public string DownloadUrl { get; private init; } = string.Empty;
-    public bool IsDownloadMode { get; private init; }
-    public string RateLimitFilePath { get; private init; } = string.Empty;
-    public int MinAccessIntervalMs { get; private init; }
+    public string ProfileDirectory { get; private set; } = Path.Combine(Path.GetTempPath(), "VRCQuickImporter", "webview-profile");
+    public string LogDirectory { get; private set; } = Path.Combine(Path.GetTempPath(), "VRCQuickImporter", "logs");
+    public string DownloadDirectory { get; private set; } = Path.Combine(Path.GetTempPath(), "VRCQuickImporter", "downloads");
+    public string InitialUrl { get; private set; } = "https://accounts.booth.pm/users/sign_in";
+    public string OutputPath { get; private set; } = string.Empty;
+    public bool SyncLibrary { get; private set; }
+    public bool ExitAfterSync { get; private set; }
+    public bool Headless { get; private set; }
+    public int Page { get; private set; } = 1;
+    public string DownloadUrl { get; private set; } = string.Empty;
+    public bool IsDownloadMode { get; private set; }
+    public string RateLimitFilePath { get; private set; } = string.Empty;
+    public int MinAccessIntervalMs { get; private set; }
 
     public static HostOptions Parse(string[] args)
     {
@@ -852,18 +873,18 @@ internal sealed class HostOptions
     private HostOptions WithMinAccessIntervalMs(int value) => Copy(minAccessIntervalMs: value);
 
     private HostOptions Copy(
-        string? profileDirectory = null,
-        string? logDirectory = null,
-        string? downloadDirectory = null,
-        string? initialUrl = null,
-        string? outputPath = null,
+        string profileDirectory = null,
+        string logDirectory = null,
+        string downloadDirectory = null,
+        string initialUrl = null,
+        string outputPath = null,
         bool? syncLibrary = null,
         bool? exitAfterSync = null,
         bool? headless = null,
         int? page = null,
-        string? downloadUrl = null,
+        string downloadUrl = null,
         bool? isDownloadMode = null,
-        string? rateLimitFilePath = null,
+        string rateLimitFilePath = null,
         int? minAccessIntervalMs = null) => new()
     {
         ProfileDirectory = profileDirectory ?? ProfileDirectory,
@@ -890,4 +911,5 @@ internal static class WinFormsExtensions
     {
         ToolTip.SetToolTip(control, text);
     }
+}
 }
