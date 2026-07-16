@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net48</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <LangVersion>9.0</LangVersion>
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>VRCQuickImporter.WebView2Host</AssemblyName>
@@ -18,5 +19,14 @@
     <Reference Include="Microsoft.CSharp" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="System.ComponentModel.Primitives" Version="4.3.0" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="$(PkgSystem_ComponentModel_Primitives)\lib\net45\System.ComponentModel.Primitives.dll">
+      <Link>System.ComponentModel.Primitives.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 </Project>
