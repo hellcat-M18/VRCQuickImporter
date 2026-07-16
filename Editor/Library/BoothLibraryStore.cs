@@ -158,6 +158,33 @@ namespace VRCQuickImporter.Editor.Library
             SaveDocument(document);
         }
 
+        /// <summary>
+        /// 商品をProductIdで検索し、同インデックス位置のまま全プロパティを上書きします。
+        /// 見つからない場合は末尾に追加します。
+        /// </summary>
+        public static void UpsertProductInPlace(BoothProduct updatedProduct)
+        {
+            if (updatedProduct == null || string.IsNullOrEmpty(updatedProduct.ProductId)) return;
+
+            var document = LoadDatabaseDocument() ?? new BoothLibraryDocument();
+            var products = document.Products ?? (document.Products = new List<BoothProduct>());
+            var updatedJson = JsonUtility.ToJson(updatedProduct);
+
+            for (var index = 0; index < products.Count; index++)
+            {
+                var existingProduct = products[index];
+                if (existingProduct == null || existingProduct.ProductId != updatedProduct.ProductId) continue;
+                if (JsonUtility.ToJson(existingProduct) == updatedJson) return;
+
+                products[index] = updatedProduct;
+                SaveDocument(document);
+                return;
+            }
+
+            products.Add(updatedProduct);
+            SaveDocument(document);
+        }
+
         public static BoothLibraryDocument ReplaceDatabaseWithProducts(IEnumerable<BoothProduct> products, int maxPage, bool initialFullSync, bool fullRefresh)
         {
             var now = DateTimeOffset.Now.ToString("yyyy/MM/dd HH:mm:ss");
