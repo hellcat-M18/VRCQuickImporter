@@ -97,6 +97,15 @@ namespace VRCQuickImporter.Editor.WebView
 #if UNITY_EDITOR_WIN
             VRCQuickImporterPaths.EnsureDirectories();
 
+            if (IsRunning)
+            {
+                EditorUtility.DisplayDialog(
+                    "VRCQuickImporter",
+                    "別のBOOTHアクセスが進行中です。完了後に再度お試しください。",
+                    "OK");
+                return null;
+            }
+
             if (!EnsureWebView2RuntimeAvailable())
             {
                 return null;
