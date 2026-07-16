@@ -28,6 +28,12 @@ namespace VRCQuickImporter.Editor.UI
         private DateTime _librarySyncStartedAtUtc;
         private string _libraryStatusOverride = string.Empty;
         private bool _librarySyncInProgress;
+        private bool _fullRefreshInProgress;
+        private int _fullRefreshCompletedPage;
+        private int _fullRefreshProductCount;
+        private string _fullRefreshProgressText = string.Empty;
+        private ProgressBar _progressBar;
+        private Label _progressLabel;
         private bool _showSyncWindow;
         private Vector2 _pendingScrollOffset;
         private bool _needsScrollRestore;
@@ -204,6 +210,13 @@ namespace VRCQuickImporter.Editor.UI
             section.Add(BuildLibraryStatePanel(products.Count, dataState));
 
             section.Add(VRCQuickImporterTheme.Spacer(8));
+            section.Add(BuildFullRefreshProgress());
+
+            // 完全リフレッシュ中は、古いキャッシュの商品カードを表示しない。
+            if (_fullRefreshInProgress)
+            {
+                return section;
+            }
 
             var grid = BuildProductGrid(filteredProducts, dataState, searchActive);
             section.Add(BuildProductNameSearchPanel(products, grid));
@@ -211,6 +224,74 @@ namespace VRCQuickImporter.Editor.UI
             section.Add(grid);
 
             return section;
+        }
+
+        private VisualElement BuildFullRefreshProgress()
+        {
+            var container = new VisualElement { name = "sync-progress-container" };
+
+            _progressLabel = new Label { name = "sync-progress-label" };
+            BoothFontProvider.Apply(_progressLabel, FontStyle.Bold);
+            _progressLabel.style.marginTop = 12;
+            _progressLabel.style.marginBottom = 4;
+            container.Add(_progressLabel);
+
+            _progressBar = new ProgressBar { name = "sync-progress-bar" };
+            _progressBar.lowValue = 0;
+            _progressBar.style.height = 24;
+            _progressBar.style.marginBottom = 12;
+            container.Add(_progressBar);
+
+            if (_fullRefreshInProgress)
+            {
+                ShowProgressBar(_fullRefreshProgressText);
+            }
+            else
+            {
+                HideProgressBar();
+            }
+
+            return container;
+        }
+
+        private void ShowProgressBar(string text)
+        {
+            if (_progressBar == null || _progressLabel == null)
+            {
+                return;
+            }
+
+            var estimatedMaxPages = _currentMaxPage > 0 ? _currentMaxPage : MaxSmartSyncPages;
+            estimatedMaxPages = Math.Max(estimatedMaxPages, Math.Max(1, _fullRefreshCompletedPage));
+
+            _progressBar.highValue = estimatedMaxPages;
+            _progressBar.value = Math.Min(_fullRefreshCompletedPage, estimatedMaxPages);
+            _progressBar.style.display = DisplayStyle.Flex;
+            _progressLabel.text = string.IsNullOrEmpty(text)
+                ? $"ページ {_syncRequestedPage} を取得中..."
+                : text;
+            _progressLabel.style.display = DisplayStyle.Flex;
+        }
+
+        private void UpdateProgressBar(int page, int productCount)
+        {
+            _fullRefreshCompletedPage = page;
+            _fullRefreshProductCount = productCount;
+            _fullRefreshProgressText = $"ページ {page} を取得完了（{productCount} 商品）";
+            ShowProgressBar(_fullRefreshProgressText);
+        }
+
+        private void HideProgressBar()
+        {
+            if (_progressBar != null)
+            {
+                _progressBar.style.display = DisplayStyle.None;
+            }
+
+            if (_progressLabel != null)
+            {
+                _progressLabel.style.display = DisplayStyle.None;
+            }
         }
 
         private VisualElement BuildLibraryStatePanel(int productCount, BoothLibraryDataState dataState)
@@ -918,6 +999,10 @@ namespace VRCQuickImporter.Editor.UI
             _syncCollectedProducts.Clear();
             _syncNewProductCount = 0;
             _syncFetchedPageCount = 0;
+            _fullRefreshInProgress = mode == LibrarySyncMode.FullRefresh || mode == LibrarySyncMode.InitialSetup;
+            _fullRefreshCompletedPage = 0;
+            _fullRefreshProductCount = 0;
+            _fullRefreshProgressText = _fullRefreshInProgress ? "ページ 1 を取得中..." : string.Empty;
             _librarySyncInProgress = true;
             _librarySyncProcess = null;
             _librarySyncStartedAtUtc = DateTime.UtcNow;
@@ -952,11 +1037,26 @@ namespace VRCQuickImporter.Editor.UI
             _librarySyncStartedAtUtc = DateTime.UtcNow;
             _libraryStatusOverride = (_showSyncWindow ? "WebView2 helperで" : "バックグラウンドで") +
                                      GetSyncModeLabel(_syncMode) + " - ページ" + _syncRequestedPage + "を取得中...";
+            if (_fullRefreshInProgress)
+            {
+                _fullRefreshProgressText = _fullRefreshCompletedPage > 0
+                    ? $"ページ {_syncRequestedPage} を取得中...（{_fullRefreshCompletedPage} ページ完了 / {_fullRefreshProductCount} 商品）"
+                    : $"ページ {_syncRequestedPage} を取得中...";
+                ShowProgressBar(_fullRefreshProgressText);
+            }
 
             _librarySyncProcess = WebView2HostLauncher.StartLibrarySync(VRCQuickImporterPaths.PendingPagePath, headless: !_showSyncWindow, page: _syncRequestedPage);
             if (_librarySyncProcess == null)
             {
                 _librarySyncInProgress = false;
+                if (_fullRefreshInProgress)
+                {
+                    HideProgressBar();
+                    _fullRefreshInProgress = false;
+                    _fullRefreshCompletedPage = 0;
+                    _fullRefreshProductCount = 0;
+                    _fullRefreshProgressText = string.Empty;
+                }
                 _libraryStatusOverride = "WebView2 helperの起動に失敗しました。";
                 RefreshWindow();
                 return false;
@@ -1172,6 +1272,10 @@ namespace VRCQuickImporter.Editor.UI
             if (pageHadProducts)
             {
                 _syncCollectedProducts.AddRange(pageProducts);
+                if (_fullRefreshInProgress)
+                {
+                    UpdateProgressBar(_syncRequestedPage, _syncCollectedProducts.Count);
+                }
             }
 
             BoothLibraryStore.DeletePendingPage();
@@ -1253,6 +1357,14 @@ namespace VRCQuickImporter.Editor.UI
             _librarySyncWaitingForRateLimit = false;
             _librarySyncLaunchAtUtc = DateTime.MinValue;
             _librarySyncProcess = null;
+            if (_fullRefreshInProgress)
+            {
+                HideProgressBar();
+                _fullRefreshInProgress = false;
+                _fullRefreshCompletedPage = 0;
+                _fullRefreshProductCount = 0;
+                _fullRefreshProgressText = string.Empty;
+            }
             _syncCollectedProducts.Clear();
             _libraryStatusOverride = keepOverride ? message : string.Empty;
             Debug.Log("[VRCQuickImporter] " + message);
