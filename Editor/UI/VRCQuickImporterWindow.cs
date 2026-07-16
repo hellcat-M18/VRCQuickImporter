@@ -482,7 +482,7 @@ namespace VRCQuickImporter.Editor.UI
         private static List<BoothProduct> MergeProductsForDisplay(IEnumerable<BoothProduct> products)
         {
             var merged = new List<BoothProduct>();
-            var seenProductIds = new HashSet<string>(StringComparer.Ordinal);
+            var representatives = new Dictionary<string, BoothProduct>(StringComparer.Ordinal);
 
             foreach (var product in products ?? Enumerable.Empty<BoothProduct>())
             {
@@ -491,15 +491,78 @@ namespace VRCQuickImporter.Editor.UI
                     continue;
                 }
 
-                // database.json にはBOOTH上のカードスロットをそのまま保存する。
-                // 表示時だけ同一ProductIdの初出エントリを代表カードとして採用する。
-                if (string.IsNullOrEmpty(product.ProductId) || seenProductIds.Add(product.ProductId))
+                // database.jsonにはBOOTH上のカードスロットをそのまま保存する。
+                // 表示時は同一ProductIdの初出を代表にし、各バリエーションの
+                // ダウンロードファイルを代表カードへ統合する。
+                if (string.IsNullOrEmpty(product.ProductId))
                 {
-                    merged.Add(product);
+                    merged.Add(CloneProduct(product));
+                    continue;
                 }
+
+                if (!representatives.TryGetValue(product.ProductId, out var representative))
+                {
+                    representative = CloneProduct(product);
+                    representatives.Add(product.ProductId, representative);
+                    merged.Add(representative);
+                    continue;
+                }
+
+                MergeDownloadFiles(representative.Files, product.Files);
             }
 
             return merged;
+        }
+
+        private static BoothProduct CloneProduct(BoothProduct source)
+        {
+            return new BoothProduct
+            {
+                ProductId = source.ProductId,
+                Name = source.Name,
+                ShopName = source.ShopName,
+                ThumbnailUrl = source.ThumbnailUrl,
+                ProductUrl = source.ProductUrl,
+                Files = (source.Files ?? new List<BoothDownloadFile>())
+                    .Where(file => file != null)
+                    .Select(CloneDownloadFile)
+                    .ToList(),
+                CategoryLabel = source.CategoryLabel,
+                BadgeText = source.BadgeText,
+                PriceText = source.PriceText,
+                LikeCount = source.LikeCount
+            };
+        }
+
+        private static BoothDownloadFile CloneDownloadFile(BoothDownloadFile source)
+        {
+            return new BoothDownloadFile
+            {
+                FileId = source.FileId,
+                Name = source.Name,
+                SizeText = source.SizeText,
+                Kind = source.Kind,
+                DownloadUrl = source.DownloadUrl
+            };
+        }
+
+        private static void MergeDownloadFiles(List<BoothDownloadFile> target, IEnumerable<BoothDownloadFile> incoming)
+        {
+            if (target == null || incoming == null)
+            {
+                return;
+            }
+
+            foreach (var file in incoming.Where(item => item != null))
+            {
+                var duplicate = target.Any(existing => existing != null &&
+                    ((!string.IsNullOrEmpty(file.FileId) && existing.FileId == file.FileId) ||
+                     (!string.IsNullOrEmpty(file.DownloadUrl) && existing.DownloadUrl == file.DownloadUrl)));
+                if (!duplicate)
+                {
+                    target.Add(CloneDownloadFile(file));
+                }
+            }
         }
 
         private List<BoothProduct> FilterProductsByName(List<BoothProduct> products)
