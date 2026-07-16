@@ -677,7 +677,7 @@ internal sealed class BrowserForm : Form
 
     private const string LibraryExtractionScript = @"
 (() => {
-  const downloadSelector = '.js-download-button[data-href]';
+  const downloadSelector = '.js-download-button[data-test=""downloadable""][data-href]';
   const itemLinkSelector = 'a[href*=""/items/""]';
   const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
   const absoluteUrl = value => {
@@ -729,12 +729,17 @@ internal sealed class BrowserForm : Form
     return row || button.parentElement;
   };
 
+  const fileNamePattern = /\.(?:unitypackage|zip|png|jpe?g|webp|gif|blend|fbx|obj|vrm|vrca|vpm|rar|7z|tar|gz|txt|pdf|mp3|wav|mp4|mov|avi|psd|ai|svg)$/i;
   const findFileName = (button, block) => {
     const row = findFileRow(button, block);
     if (!row) return '';
     const copy = row.cloneNode(true);
     copy.querySelectorAll(downloadSelector).forEach(element => element.remove());
-    return elementText(copy);
+    const lines = (copy.innerText || copy.textContent || '')
+      .split(/\r?\n/)
+      .map(normalize)
+      .filter(Boolean);
+    return lines.find(line => fileNamePattern.test(line)) || normalize(lines.join(' '));
   };
 
   const itemAnchorsById = new Map();
