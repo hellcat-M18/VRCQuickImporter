@@ -22,12 +22,17 @@ namespace VRCQuickImporter.Editor.UI
         /// </summary>
         /// <param name="onImport">メインアクション。選択中ファイルを渡す。</param>
         /// <param name="onOpenPage">商品ページを開くサブアクション。null なら表示しない。</param>
+        /// <param name="onDoubleClick">カード本体のダブルクリック時のアクション。</param>
         public static VisualElement Build(
             BoothProduct product,
             Action<BoothProduct, BoothDownloadFile> onImport,
-            Action<BoothProduct> onOpenPage = null)
+            Action<BoothProduct> onOpenPage = null,
+            Action<BoothProduct> onDoubleClick = null)
         {
             var card = VRCQuickImporterTheme.MakeShell(VRCQuickImporterTheme.RadiusCardOuter, VRCQuickImporterTheme.SpaceXs);
+            card.name = "product-card-" + product.ProductId;
+            card.AddToClassList("vrcqi-product-card");
+            card.style.position = Position.Relative;
 
             var core = VRCQuickImporterTheme.MakeCore(VRCQuickImporterTheme.RadiusCardInner, VRCQuickImporterTheme.SpaceMd);
             card.Add(core);
@@ -49,6 +54,19 @@ namespace VRCQuickImporter.Editor.UI
                 core.style.backgroundColor = defaultCore;
             });
 
+            if (onDoubleClick != null)
+            {
+                card.RegisterCallback<ClickEvent>(evt =>
+                {
+                    if (evt.clickCount != 2 || evt.button != 0 || IsInteractiveControl(evt.target as VisualElement))
+                    {
+                        return;
+                    }
+
+                    onDoubleClick.Invoke(product);
+                });
+            }
+
             return card;
         }
 
@@ -62,6 +80,154 @@ namespace VRCQuickImporter.Editor.UI
             var size = Mathf.Max(1f, cardWidth - NestingInsetBothSides);
             thumbnail.style.width = size;
             thumbnail.style.height = size;
+        }
+
+        /// <summary>カード上にインポート先選択オーバーレイを表示する。</summary>
+        public static void ShowImportPathOverlay(VisualElement cardRoot, List<string> validPaths, Action<string> onPathSelected)
+        {
+            if (cardRoot == null || validPaths == null || validPaths.Count == 0)
+            {
+                return;
+            }
+
+            HideImportPathOverlay(cardRoot);
+            cardRoot.style.position = Position.Relative;
+
+            var overlay = new VisualElement { name = "import-path-overlay" };
+            overlay.style.position = Position.Absolute;
+            overlay.style.left = 0;
+            overlay.style.top = 0;
+            overlay.style.right = 0;
+            overlay.style.bottom = 0;
+            overlay.style.backgroundColor = new Color(0.1f, 0.1f, 0.15f, 0.92f);
+            overlay.style.justifyContent = Justify.Center;
+            overlay.style.alignItems = Align.Center;
+            overlay.style.paddingLeft = VRCQuickImporterTheme.SpaceMd;
+            overlay.style.paddingRight = VRCQuickImporterTheme.SpaceMd;
+            overlay.style.paddingTop = VRCQuickImporterTheme.SpaceMd;
+            overlay.style.paddingBottom = VRCQuickImporterTheme.SpaceMd;
+            overlay.focusable = true;
+            VRCQuickImporterTheme.SetBorderRadius(overlay, VRCQuickImporterTheme.RadiusCardOuter);
+
+            var content = new VisualElement();
+            content.style.width = new Length(100, LengthUnit.Percent);
+            content.style.maxHeight = 180;
+            content.style.backgroundColor = VRCQuickImporterTheme.CardCore;
+            content.style.paddingLeft = VRCQuickImporterTheme.SpaceMd;
+            content.style.paddingRight = VRCQuickImporterTheme.SpaceMd;
+            content.style.paddingTop = VRCQuickImporterTheme.SpaceSm;
+            content.style.paddingBottom = VRCQuickImporterTheme.SpaceSm;
+            VRCQuickImporterTheme.SetBorderRadius(content, VRCQuickImporterTheme.RadiusCardInner);
+            overlay.Add(content);
+
+            var title = new Label("インポート先を選択");
+            BoothFontProvider.Apply(title, FontStyle.Bold);
+            title.style.color = VRCQuickImporterTheme.TextPrimary;
+            title.style.fontSize = VRCQuickImporterTheme.FontBody;
+            title.style.marginBottom = VRCQuickImporterTheme.SpaceXs;
+            content.Add(title);
+
+            var scrollView = new ScrollView(ScrollViewMode.Vertical);
+            scrollView.style.maxHeight = 128;
+            content.Add(scrollView);
+
+            foreach (var path in validPaths)
+            {
+                var selectedPath = path;
+                var pathButton = new Button(() =>
+                {
+                    onPathSelected?.Invoke(selectedPath);
+                    HideImportPathOverlay(cardRoot);
+                })
+                {
+                    text = selectedPath
+                };
+                pathButton.tooltip = selectedPath;
+                pathButton.style.whiteSpace = WhiteSpace.Normal;
+                pathButton.style.unityTextAlign = TextAnchor.MiddleLeft;
+                pathButton.style.backgroundColor = VRCQuickImporterTheme.ChipBg;
+                pathButton.style.color = VRCQuickImporterTheme.TextPrimary;
+                pathButton.style.fontSize = VRCQuickImporterTheme.FontCaption;
+                pathButton.style.marginBottom = VRCQuickImporterTheme.SpaceXs;
+                pathButton.style.paddingTop = VRCQuickImporterTheme.SpaceXs;
+                pathButton.style.paddingBottom = VRCQuickImporterTheme.SpaceXs;
+                VRCQuickImporterTheme.SetBorderRadius(pathButton, VRCQuickImporterTheme.RadiusChip);
+                scrollView.Add(pathButton);
+            }
+
+            cardRoot.Add(overlay);
+            overlay.BringToFront();
+
+            var state = new ImportPathOverlayState
+            {
+                Root = cardRoot.panel?.visualTree
+            };
+            state.RootPointerDownCallback = evt =>
+            {
+                var target = evt.target as VisualElement;
+                if (target != overlay && (target == null || !overlay.Contains(target)))
+                {
+                    HideImportPathOverlay(cardRoot);
+                }
+            };
+            state.CardKeyDownCallback = evt =>
+            {
+                if (evt.keyCode != KeyCode.Escape)
+                {
+                    return;
+                }
+
+                evt.StopPropagation();
+                HideImportPathOverlay(cardRoot);
+            };
+            overlay.userData = state;
+            state.Root?.RegisterCallback(state.RootPointerDownCallback, TrickleDown.TrickleDown);
+            cardRoot.RegisterCallback(state.CardKeyDownCallback);
+            overlay.schedule.Execute(() => overlay.Focus());
+        }
+
+        /// <summary>表示中のインポート先選択オーバーレイを閉じる。</summary>
+        public static void HideImportPathOverlay(VisualElement cardRoot)
+        {
+            if (cardRoot == null)
+            {
+                return;
+            }
+
+            var overlay = cardRoot.Q<VisualElement>("import-path-overlay");
+            if (overlay == null)
+            {
+                return;
+            }
+
+            var state = overlay.userData as ImportPathOverlayState;
+            state?.Root?.UnregisterCallback(state.RootPointerDownCallback, TrickleDown.TrickleDown);
+            if (state?.CardKeyDownCallback != null)
+            {
+                cardRoot.UnregisterCallback(state.CardKeyDownCallback);
+            }
+
+            overlay.RemoveFromHierarchy();
+        }
+
+        private static bool IsInteractiveControl(VisualElement target)
+        {
+            if (target == null)
+            {
+                return false;
+            }
+
+            return target is Button
+                || target is PopupField<string>
+                || target.GetFirstAncestorOfType<Button>() != null
+                || target.GetFirstAncestorOfType<PopupField<string>>() != null;
+        }
+
+        private sealed class ImportPathOverlayState
+        {
+            public VisualElement Root;
+            public EventCallback<PointerDownEvent> RootPointerDownCallback;
+            public EventCallback<KeyDownEvent> CardKeyDownCallback;
         }
 
         private static void PaintBorder(VisualElement el, Color color)

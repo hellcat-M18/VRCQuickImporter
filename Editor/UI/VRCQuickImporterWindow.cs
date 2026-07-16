@@ -552,6 +552,7 @@ namespace VRCQuickImporter.Editor.UI
 
             state.LastColumnCount = layout.ColumnCount;
             state.LastCardWidth = layout.CardWidth;
+            HideImportPathOverlays();
             grid.Clear();
 
             for (var index = 0; index < state.Products.Count;)
@@ -563,7 +564,11 @@ namespace VRCQuickImporter.Editor.UI
 
                 for (var column = 0; column < layout.ColumnCount && index < state.Products.Count; column++, index++)
                 {
-                    var card = ProductCard.Build(state.Products[index], (p, f) => OnImportRequested?.Invoke(p, f), OpenProductPage);
+                    var card = ProductCard.Build(
+                        state.Products[index],
+                        (p, f) => OnImportRequested?.Invoke(p, f),
+                        OpenProductPage,
+                        OnProductCardDoubleClick);
                     ProductCard.ApplyCardWidth(card, layout.CardWidth);
                     card.style.marginRight = column == layout.ColumnCount - 1 ? 0 : CardSpacing;
                     row.Add(card);
@@ -1282,8 +1287,61 @@ namespace VRCQuickImporter.Editor.UI
             Application.OpenURL(product.ProductUrl);
         }
 
+        private void OnProductCardDoubleClick(BoothProduct product)
+        {
+            HideImportPathOverlays();
+
+            var paths = BoothImportHistoryStore.GetEntries(product.ProductId)
+                .SelectMany(entry => entry.Paths ?? Enumerable.Empty<string>())
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(IsExistingAssetPath)
+                .ToList();
+
+            if (paths.Count == 0)
+            {
+                return;
+            }
+
+            if (paths.Count == 1)
+            {
+                PingAssetPath(paths[0]);
+                return;
+            }
+
+            var cardRoot = rootVisualElement.Q<VisualElement>("product-card-" + product.ProductId);
+            if (cardRoot != null)
+            {
+                ProductCard.ShowImportPathOverlay(cardRoot, paths, PingAssetPath);
+            }
+        }
+
+        private static bool IsExistingAssetPath(string path)
+        {
+            return AssetDatabase.IsValidFolder(path) || File.Exists(Path.GetFullPath(path));
+        }
+
+        private static void PingAssetPath(string path)
+        {
+            var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
+            if (asset == null)
+            {
+                return;
+            }
+
+            Selection.activeObject = asset;
+            EditorGUIUtility.PingObject(asset);
+        }
+
+        private void HideImportPathOverlays()
+        {
+            rootVisualElement.Query<VisualElement>(className: "vrcqi-product-card")
+                .ForEach(ProductCard.HideImportPathOverlay);
+        }
+
         private void OnDisable()
         {
+            HideImportPathOverlays();
             EditorApplication.update -= PollLibrarySync;
         }
 
