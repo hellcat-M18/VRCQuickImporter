@@ -678,6 +678,7 @@ internal sealed class BrowserForm : Form
     private const string LibraryExtractionScript = @"
 (() => {
   const downloadSelector = '.js-download-button[data-test=""downloadable""][data-href]';
+  const downloadControlSelector = '[data-test=""downloadable""],[data-test=""other-downloads-button""]';
   const itemLinkSelector = 'a[href*=""/items/""]';
   const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
   const absoluteUrl = value => {
@@ -716,52 +717,41 @@ internal sealed class BrowserForm : Form
     return null;
   };
 
-  // 1個のDLボタンだけを含む最も外側の祖先を、対応するファイル行として使う。
-  const findFileRow = (button, block) => {
-    let element = button.parentElement;
-    let row = null;
-    while (element && element !== block) {
-      if (element.querySelectorAll(downloadSelector).length === 1) {
-        row = element;
-      }
-      element = element.parentElement;
-    }
-    return row || button.parentElement;
-  };
-
+  // 主DLボタンから上へ辿り、DL操作を含まない兄弟要素をファイル名列として取得する。
+  // 表示用CSSクラスや行全体のテキストには依存しない。
   const findFileName = (button, block) => {
-    const row = findFileRow(button, block);
-    if (!row) return '';
-
-    // BOOTHのファイル行は、左にファイル名列・右にDLボタン列を置く。
-    // 表示用CSSクラスや拡張子の一覧には依存せず、兄弟関係だけで左列を取得する。
-    for (const child of Array.from(row.children)) {
-      if (child.querySelector(downloadSelector)) continue;
-      const text = elementText(child);
-      if (text) return text;
+    let branch = button;
+    while (branch.parentElement && branch.parentElement !== block) {
+      const parent = branch.parentElement;
+      const candidate = Array.from(parent.children).find(child =>
+        child !== branch &&
+        !child.matches(downloadControlSelector) &&
+        !child.querySelector(downloadControlSelector) &&
+        elementText(child)
+      );
+      if (candidate) return elementText(candidate);
+      branch = parent;
     }
-
-    // 旧レイアウト向けフォールバック。
-    const copy = row.cloneNode(true);
-    copy.querySelectorAll(downloadSelector).forEach(element => element.remove());
-    return elementText(copy);
+    return '';
   };
 
-  const itemAnchorsById = new Map();
-  for (const anchor of Array.from(document.querySelectorAll(itemLinkSelector))) {
-    const productId = productIdForAnchor(anchor);
-    if (!productId) continue;
-    if (!itemAnchorsById.has(productId)) itemAnchorsById.set(productId, []);
-    itemAnchorsById.get(productId).push(anchor);
-  }
-
+  // 同じカードには画像・商品名など複数の商品リンクが存在するため、カード単位でだけ重複を除外する。
+  // 同一ProductIdの別バリエーションカードは個別エントリとして保持する。
+  const itemAnchors = Array.from(document.querySelectorAll(itemLinkSelector));
+  const processedBlocks = new Set();
   const products = [];
   const parserErrors = [];
-  for (const [productId, anchors] of itemAnchorsById) {
-    const anchor = anchors.find(item => elementText(item).length > 0) || anchors[0];
-    const block = anchors.map(item => findProductBlock(item, productId)).find(Boolean);
-    if (!block) continue;
+  for (const sourceAnchor of itemAnchors) {
+    const productId = productIdForAnchor(sourceAnchor);
+    if (!productId) continue;
 
+    const block = findProductBlock(sourceAnchor, productId);
+    if (!block || processedBlocks.has(block)) continue;
+    processedBlocks.add(block);
+
+    const anchors = Array.from(block.querySelectorAll(itemLinkSelector))
+      .filter(item => productIdForAnchor(item) === productId);
+    const anchor = anchors.find(item => elementText(item).length > 0) || anchors[0] || sourceAnchor;
     const href = absoluteUrl(anchor.getAttribute('href'));
     const name = elementText(anchor);
     if (!name) continue;
@@ -797,9 +787,11 @@ internal sealed class BrowserForm : Form
       seenDownloadUrls.add(downloadUrl);
     }
 
-    const expectedFileCount = block.querySelectorAll(downloadSelector).length;
-    if (files.length !== expectedFileCount) {
-      parserErrors.push(`商品 ${productId} のDLファイル抽出が不完全です（ボタン ${expectedFileCount} 件、ファイル名 ${files.length} 件）。`);
+    const expectedDownloadUrls = new Set(Array.from(block.querySelectorAll(downloadSelector))
+      .map(button => absoluteUrl(button.getAttribute('data-href')))
+      .filter(Boolean));
+    if (files.length !== expectedDownloadUrls.size) {
+      parserErrors.push(`商品 ${productId} のDLファイル抽出が不完全です（ボタン ${expectedDownloadUrls.size} 件、ファイル名 ${files.length} 件）。`);
       files = [];
     }
 
@@ -825,7 +817,7 @@ internal sealed class BrowserForm : Form
 
   const parserError = parserErrors.length > 0
     ? parserErrors.join('\n')
-    : itemAnchorsById.size > 0 && products.length === 0
+    : itemAnchors.length > 0 && products.length === 0
       ? '商品リンクは検出されましたが、商品ブロックを抽出できませんでした。BOOTHのページ構造が変更された可能性があります。'
       : '';
   return {

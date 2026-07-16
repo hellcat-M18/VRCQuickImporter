@@ -158,7 +158,7 @@ namespace VRCQuickImporter.Editor.UI
             }
 
             EnsureProductNameSearchLoaded();
-            var products = BoothLibraryStore.LoadProducts(out _, out var dataState);
+            var products = MergeProductsForDisplay(BoothLibraryStore.LoadProducts(out _, out var dataState));
             var searchActive = IsProductNameSearchActive() && products.Count > 0;
             var filteredProducts = searchActive ? FilterProductsByName(products) : products;
 
@@ -477,6 +477,29 @@ namespace VRCQuickImporter.Editor.UI
         private bool IsProductNameSearchActive()
         {
             return !string.IsNullOrWhiteSpace(_productNameSearchQuery);
+        }
+
+        private static List<BoothProduct> MergeProductsForDisplay(IEnumerable<BoothProduct> products)
+        {
+            var merged = new List<BoothProduct>();
+            var seenProductIds = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var product in products ?? Enumerable.Empty<BoothProduct>())
+            {
+                if (product == null)
+                {
+                    continue;
+                }
+
+                // database.json にはBOOTH上のカードスロットをそのまま保存する。
+                // 表示時だけ同一ProductIdの初出エントリを代表カードとして採用する。
+                if (string.IsNullOrEmpty(product.ProductId) || seenProductIds.Add(product.ProductId))
+                {
+                    merged.Add(product);
+                }
+            }
+
+            return merged;
         }
 
         private List<BoothProduct> FilterProductsByName(List<BoothProduct> products)

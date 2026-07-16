@@ -193,7 +193,7 @@ namespace VRCQuickImporter.Editor.Library
                 SchemaVersion = "1",
                 SyncedAt = now,
                 SourceUrl = "https://accounts.booth.pm/library",
-                Products = MergeProducts(new List<BoothProduct>(), products),
+                Products = CopyProducts(products),
                 MaxPage = maxPage,
                 ReachedLastPage = true,
                 InitialFullSyncCompleted = true,
@@ -205,26 +205,24 @@ namespace VRCQuickImporter.Editor.Library
             return document;
         }
 
-        private static List<BoothProduct> MergeProducts(IEnumerable<BoothProduct> existing, IEnumerable<BoothProduct> incoming)
+        private static List<BoothProduct> MergeProducts(IEnumerable<BoothProduct> incoming, IEnumerable<BoothProduct> existing)
         {
-            var result = new List<BoothProduct>();
-            var indexById = new Dictionary<string, int>();
+            var incomingProducts = CopyProducts(incoming);
+            var existingProducts = CopyProducts(existing);
 
-            void Upsert(BoothProduct product)
-            {
-                if (product == null || string.IsNullOrEmpty(product.ProductId)) return;
-                if (indexById.ContainsKey(product.ProductId))
-                {
-                    return;
-                }
-
-                indexById[product.ProductId] = result.Count;
-                result.Add(product);
-            }
-
-            foreach (var product in existing ?? Enumerable.Empty<BoothProduct>()) Upsert(product);
-            foreach (var product in incoming ?? Enumerable.Empty<BoothProduct>()) Upsert(product);
+            // 増分同期では先頭ページ群を再取得する。ProductIdでは重複排除せず、
+            // 再取得したカードスロット数だけ古い先頭スロットを置き換えてページ順を保つ。
+            var result = new List<BoothProduct>(incomingProducts.Count + Math.Max(0, existingProducts.Count - incomingProducts.Count));
+            result.AddRange(incomingProducts);
+            result.AddRange(existingProducts.Skip(incomingProducts.Count));
             return result;
+        }
+
+        private static List<BoothProduct> CopyProducts(IEnumerable<BoothProduct> products)
+        {
+            return (products ?? Enumerable.Empty<BoothProduct>())
+                .Where(product => product != null && !string.IsNullOrEmpty(product.ProductId))
+                .ToList();
         }
 
         /// <summary>
