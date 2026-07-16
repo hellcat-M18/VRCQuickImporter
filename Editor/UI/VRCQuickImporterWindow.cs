@@ -67,6 +67,12 @@ namespace VRCQuickImporter.Editor.UI
         private const int GridPadding = 10;
         private const int MaxSmartSyncPages = 50;
 
+        [Serializable]
+        private sealed class LibraryExtractionStatus
+        {
+            public string ParserError = string.Empty;
+        }
+
         [MenuItem("Tools/VRCQuickImporter")]
         public static void Open()
         {
@@ -1096,6 +1102,15 @@ namespace VRCQuickImporter.Editor.UI
         {
             WaitForLibrarySyncProcessExitBriefly();
 
+            var parserError = TryReadLibraryParserError(VRCQuickImporterPaths.PendingPagePath);
+            if (!string.IsNullOrEmpty(parserError))
+            {
+                Debug.LogWarning("[VRCQuickImporter] BOOTHライブラリ抽出エラー: " + parserError);
+                BoothLibraryStore.DeletePendingPage();
+                FinishLibrarySync("BOOTHライブラリのページ構造を解析できませんでした。既存のローカルJSONキャッシュは変更していません。", keepOverride: true);
+                return;
+            }
+
             var pending = BoothLibraryStore.LoadPendingPageDocument();
             if (pending == null)
             {
@@ -1359,7 +1374,11 @@ namespace VRCQuickImporter.Editor.UI
                 $"商品情報を確認中...（ページ {page}）",
                 (float)_productVerificationPageIndex / _productVerificationPages.Count);
             _productVerificationPageStartedAtUtc = DateTime.UtcNow;
-            _productVerificationProcess = WebView2HostLauncher.StartLibrarySync(_productVerificationOutputPath, headless: true, page: page);
+            _productVerificationProcess = WebView2HostLauncher.StartLibrarySync(
+                _productVerificationOutputPath,
+                headless: true,
+                page: page,
+                skipRateLimit: _productVerificationPageIndex > 0);
             if (_productVerificationProcess == null)
             {
                 FinishProductVerification();
@@ -1439,12 +1458,33 @@ namespace VRCQuickImporter.Editor.UI
             try
             {
                 var json = File.ReadAllText(_productVerificationOutputPath);
+                var status = JsonUtility.FromJson<LibraryExtractionStatus>(json);
+                if (!string.IsNullOrEmpty(status?.ParserError))
+                {
+                    Debug.LogWarning("[VRCQuickImporter] 商品確認用ライブラリページの抽出エラー: " + status.ParserError);
+                    return null;
+                }
+
                 return JsonUtility.FromJson<BoothLibraryDocument>(json);
             }
             catch (Exception ex)
             {
                 Debug.LogWarning("[VRCQuickImporter] 商品確認用ライブラリページの読み込みに失敗しました: " + ex.Message);
                 return null;
+            }
+        }
+
+        private static string TryReadLibraryParserError(string path)
+        {
+            try
+            {
+                var json = File.ReadAllText(path);
+                return JsonUtility.FromJson<LibraryExtractionStatus>(json)?.ParserError ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] BOOTHライブラリ抽出状態の読み込みに失敗しました: " + ex.Message);
+                return string.Empty;
             }
         }
 

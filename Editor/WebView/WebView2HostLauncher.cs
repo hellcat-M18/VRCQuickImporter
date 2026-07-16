@@ -44,7 +44,7 @@ namespace VRCQuickImporter.Editor.WebView
             });
         }
 
-        public static Process StartLibrarySync(string outputPath, bool headless = true, int page = 1)
+        public static Process StartLibrarySync(string outputPath, bool headless = true, int page = 1, bool skipRateLimit = false)
         {
             var url = page <= 1
                 ? "https://accounts.booth.pm/library"
@@ -67,6 +67,11 @@ namespace VRCQuickImporter.Editor.WebView
             if (headless)
             {
                 args.Add("--headless");
+            }
+
+            if (skipRateLimit)
+            {
+                args.Add("--skip-rate-limit");
             }
 
             return StartHost(args);

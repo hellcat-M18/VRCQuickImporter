@@ -395,7 +395,7 @@ internal sealed class BrowserForm : Form
 
     private async Task WaitAndMarkLibraryAccessAsync()
     {
-        if (_options.MinAccessIntervalMs <= 0 || string.IsNullOrWhiteSpace(_options.RateLimitFilePath))
+        if (_options.SkipRateLimit || _options.MinAccessIntervalMs <= 0 || string.IsNullOrWhiteSpace(_options.RateLimitFilePath))
         {
             return;
         }
@@ -677,11 +677,12 @@ internal sealed class BrowserForm : Form
 
     private const string LibraryExtractionScript = @"
 (() => {
+  const downloadSelector = '.js-download-button[data-href]';
+  const itemLinkSelector = 'a[href*=""/items/""]';
   const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
   const absoluteUrl = value => {
     try { return value ? new URL(value, location.href).href : ''; } catch { return ''; }
   };
-  const hasClasses = (element, ...classes) => element && classes.every(className => element.classList.contains(className));
   const itemIdFromUrl = href => {
     const match = (href || '').match(/\/items\/(\d+)/);
     return match ? match[1] : '';
@@ -693,61 +694,97 @@ internal sealed class BrowserForm : Form
     if (/\.(png|jpg|jpeg|webp|gif)$/.test(lower)) return 3;
     return 0;
   };
-  const directElementChildren = element => Array.from(element ? element.children : []).filter(child => child instanceof HTMLElement);
-  const findProductBlocks = () => Array.from(document.querySelectorAll('main div'))
-    .filter(element => hasClasses(element, 'mb-16', 'bg-white', 'p-16'))
-    .filter(element => element.querySelector('a[href*=""/items/""] img.l-library-item-thumbnail'));
-  const findProductRow = block => directElementChildren(block)
-    .find(element => hasClasses(element, 'flex', 'border-b', 'pb-16')) || block;
-  const findTitleAnchor = row => Array.from(row.querySelectorAll('a[href*=""/items/""]'))
-    .find(anchor => normalize(anchor.innerText || anchor.textContent).length > 0);
-  const findShopAnchor = row => Array.from(row.querySelectorAll('a[href]'))
-    .find(anchor => !/\/items\//.test(anchor.getAttribute('href') || '') && /\.booth\.pm\/?/.test(anchor.href || '') && normalize(anchor.innerText || anchor.textContent).length > 0);
-  const findFileRows = block => Array.from(block.querySelectorAll('div'))
-    .filter(element => hasClasses(element, 'mt-16', 'desktop:flex', 'desktop:justify-between', 'desktop:items-center'));
-  const findFileName = row => {
-    const nameContainer = Array.from(row.querySelectorAll('div')).find(element => hasClasses(element, 'min-w-0', 'break-words', 'whitespace-pre-line'));
-    const text14 = nameContainer && Array.from(nameContainer.querySelectorAll('div')).find(element => element.classList.contains('text-14'));
-    return normalize((text14 || nameContainer || row).innerText || (text14 || nameContainer || row).textContent);
+  const elementText = element => normalize(element && (element.innerText || element.textContent));
+  const productIdForAnchor = anchor => itemIdFromUrl(absoluteUrl(anchor && anchor.getAttribute('href')));
+  const productIdsWithin = element => new Set(Array.from(element.querySelectorAll(itemLinkSelector))
+    .map(productIdForAnchor)
+    .filter(Boolean));
+
+  // 商品リンクから、DLボタンを持ち他商品を含まない最小祖先を商品ブロックとして特定する。
+  // 表示用のCSSクラスには依存しない。
+  const findProductBlock = (anchor, productId) => {
+    let element = anchor.parentElement;
+    while (element && element !== document.body) {
+      if (element.querySelector(downloadSelector)) {
+        const productIds = productIdsWithin(element);
+        if (productIds.size === 1 && productIds.has(productId)) {
+          return element;
+        }
+      }
+      element = element.parentElement;
+    }
+    return null;
   };
 
+  // 1個のDLボタンだけを含む最も外側の祖先を、対応するファイル行として使う。
+  const findFileRow = (button, block) => {
+    let element = button.parentElement;
+    let row = null;
+    while (element && element !== block) {
+      if (element.querySelectorAll(downloadSelector).length === 1) {
+        row = element;
+      }
+      element = element.parentElement;
+    }
+    return row || button.parentElement;
+  };
+
+  const findFileName = (button, block) => {
+    const row = findFileRow(button, block);
+    if (!row) return '';
+    const copy = row.cloneNode(true);
+    copy.querySelectorAll(downloadSelector).forEach(element => element.remove());
+    return elementText(copy);
+  };
+
+  const itemAnchorsById = new Map();
+  for (const anchor of Array.from(document.querySelectorAll(itemLinkSelector))) {
+    const productId = productIdForAnchor(anchor);
+    if (!productId) continue;
+    if (!itemAnchorsById.has(productId)) itemAnchorsById.set(productId, []);
+    itemAnchorsById.get(productId).push(anchor);
+  }
+
   const products = [];
-  const seen = new Set();
+  for (const [productId, anchors] of itemAnchorsById) {
+    const anchor = anchors.find(item => elementText(item).length > 0) || anchors[0];
+    const block = anchors.map(item => findProductBlock(item, productId)).find(Boolean);
+    if (!block) continue;
 
-  for (const block of findProductBlocks()) {
-    const row = findProductRow(block);
-    const image = row.querySelector('img.l-library-item-thumbnail');
-    const imageAnchor = image && image.closest('a[href*=""/items/""]');
-    const titleAnchor = findTitleAnchor(row) || imageAnchor;
-    const href = absoluteUrl(titleAnchor && titleAnchor.getAttribute('href'));
-    const productId = itemIdFromUrl(href);
-    if (!productId || seen.has(productId)) continue;
-
-    const titleElement = titleAnchor && (titleAnchor.querySelector('.font-bold') || titleAnchor);
-    const name = normalize(titleElement && (titleElement.innerText || titleElement.textContent));
+    const href = absoluteUrl(anchor.getAttribute('href'));
+    const name = elementText(anchor);
     if (!name) continue;
 
-    const shopAnchor = findShopAnchor(row);
-    const shopElement = shopAnchor && (shopAnchor.querySelector('.text-text-gray600') || shopAnchor);
-    let shopName = normalize(shopElement && (shopElement.innerText || shopElement.textContent));
+    const shopAnchor = Array.from(block.querySelectorAll('a[href]'))
+      .find(item => {
+        const itemHref = absoluteUrl(item.getAttribute('href'));
+        return itemHref &&
+          !itemIdFromUrl(itemHref) &&
+          /(^|\.)booth\.pm$/i.test((new URL(itemHref)).hostname) &&
+          elementText(item).length > 0;
+      });
+    let shopName = elementText(shopAnchor);
     if (shopName === name) shopName = '';
 
-    const files = findFileRows(block)
-      .map((fileRow, index) => {
-        const fileName = findFileName(fileRow);
-        if (!fileName) return null;
-        const dlBtn = fileRow.querySelector('.js-download-button[data-href]');
-        const dlHref = dlBtn ? absoluteUrl(dlBtn.getAttribute('data-href')) : '';
-        const dlId = dlHref ? (dlHref.match(/\/downloadables\/(\d+)/) || ['', ''])[1] : '';
-        return {
-          FileId: dlId || (productId + ':file:' + index),
-          Name: fileName,
-          SizeText: '',
-          Kind: kindFromName(fileName),
-          DownloadUrl: dlHref
-        };
-      })
-      .filter(Boolean);
+    const image = Array.from(block.querySelectorAll('img'))
+      .find(item => productIdForAnchor(item.closest(itemLinkSelector)) === productId) || block.querySelector('img');
+    const files = [];
+    const seenDownloadUrls = new Set();
+    for (const button of Array.from(block.querySelectorAll(downloadSelector))) {
+      const downloadUrl = absoluteUrl(button.getAttribute('data-href'));
+      if (!downloadUrl || seenDownloadUrls.has(downloadUrl)) continue;
+      const fileName = findFileName(button, block);
+      if (!fileName) continue;
+      const downloadId = (downloadUrl.match(/\/downloadables\/(\d+)/) || ['', ''])[1];
+      files.push({
+        FileId: downloadId || (productId + ':file:' + files.length),
+        Name: fileName,
+        SizeText: '',
+        Kind: kindFromName(fileName),
+        DownloadUrl: downloadUrl
+      });
+      seenDownloadUrls.add(downloadUrl);
+    }
 
     products.push({
       ProductId: productId,
@@ -767,11 +804,15 @@ internal sealed class BrowserForm : Form
       PriceText: '',
       LikeCount: 0
     });
-    seen.add(productId);
   }
 
+  const parserError = itemAnchorsById.size > 0 && products.length === 0
+    ? '商品リンクは検出されましたが、商品ブロックを抽出できませんでした。BOOTHのページ構造が変更された可能性があります。'
+    : '';
   return {
     SchemaVersion: '1',
+    ParserVersion: '2',
+    ParserError: parserError,
     SyncedAt: new Date().toLocaleString(),
     SourceUrl: location.href,
     Products: products.slice(0, 200)
@@ -795,6 +836,7 @@ class HostOptions
     public bool IsDownloadMode { get; private set; }
     public string RateLimitFilePath { get; private set; } = string.Empty;
     public int MinAccessIntervalMs { get; private set; }
+    public bool SkipRateLimit { get; private set; }
 
     public static HostOptions Parse(string[] args)
     {
@@ -834,6 +876,9 @@ class HostOptions
                         options = options.WithMinAccessIntervalMs(intervalMs);
                     }
                     break;
+                case "--skip-rate-limit":
+                    options = options.WithSkipRateLimit();
+                    break;
                 case "--profile":
                 case "--logs":
                 case "--downloads":
@@ -871,6 +916,7 @@ class HostOptions
     private HostOptions WithDownloadUrl(string value) => Copy(downloadUrl: value, isDownloadMode: true);
     private HostOptions WithRateLimitFile(string value) => Copy(rateLimitFilePath: value);
     private HostOptions WithMinAccessIntervalMs(int value) => Copy(minAccessIntervalMs: value);
+    private HostOptions WithSkipRateLimit() => Copy(skipRateLimit: true);
 
     private HostOptions Copy(
         string profileDirectory = null,
@@ -885,7 +931,8 @@ class HostOptions
         string downloadUrl = null,
         bool? isDownloadMode = null,
         string rateLimitFilePath = null,
-        int? minAccessIntervalMs = null) => new()
+        int? minAccessIntervalMs = null,
+        bool? skipRateLimit = null) => new()
     {
         ProfileDirectory = profileDirectory ?? ProfileDirectory,
         LogDirectory = logDirectory ?? LogDirectory,
@@ -899,7 +946,8 @@ class HostOptions
         DownloadUrl = downloadUrl ?? DownloadUrl,
         IsDownloadMode = isDownloadMode ?? IsDownloadMode,
         RateLimitFilePath = rateLimitFilePath ?? RateLimitFilePath,
-        MinAccessIntervalMs = minAccessIntervalMs ?? MinAccessIntervalMs
+        MinAccessIntervalMs = minAccessIntervalMs ?? MinAccessIntervalMs,
+        SkipRateLimit = skipRateLimit ?? SkipRateLimit
     };
 }
 
