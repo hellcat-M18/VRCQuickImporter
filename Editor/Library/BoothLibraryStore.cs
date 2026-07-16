@@ -160,29 +160,63 @@ namespace VRCQuickImporter.Editor.Library
 
         /// <summary>
         /// 商品をProductIdで検索し、同インデックス位置のまま全プロパティを上書きします。
+        /// 同一ProductIdのバリエーションが複数ある場合、previousFileに一致するスロットを更新します。
         /// 見つからない場合は末尾に追加します。
         /// </summary>
-        public static void UpsertProductInPlace(BoothProduct updatedProduct)
+        public static void UpsertProductInPlace(BoothProduct updatedProduct, BoothDownloadFile previousFile = null)
         {
             if (updatedProduct == null || string.IsNullOrEmpty(updatedProduct.ProductId)) return;
 
             var document = LoadDatabaseDocument() ?? new BoothLibraryDocument();
             var products = document.Products ?? (document.Products = new List<BoothProduct>());
             var updatedJson = JsonUtility.ToJson(updatedProduct);
+            var fallbackIndex = -1;
 
             for (var index = 0; index < products.Count; index++)
             {
                 var existingProduct = products[index];
                 if (existingProduct == null || existingProduct.ProductId != updatedProduct.ProductId) continue;
-                if (JsonUtility.ToJson(existingProduct) == updatedJson) return;
+                if (fallbackIndex < 0)
+                {
+                    fallbackIndex = index;
+                }
 
-                products[index] = updatedProduct;
-                SaveDocument(document);
+                if (previousFile != null && !ContainsMatchingFile(existingProduct.Files, previousFile))
+                {
+                    continue;
+                }
+
+                ReplaceProductAtIndex(products, index, updatedProduct, updatedJson, document);
+                return;
+            }
+
+            if (fallbackIndex >= 0)
+            {
+                ReplaceProductAtIndex(products, fallbackIndex, updatedProduct, updatedJson, document);
                 return;
             }
 
             products.Add(updatedProduct);
             SaveDocument(document);
+        }
+
+        private static void ReplaceProductAtIndex(List<BoothProduct> products, int index, BoothProduct updatedProduct, string updatedJson, BoothLibraryDocument document)
+        {
+            if (JsonUtility.ToJson(products[index]) == updatedJson)
+            {
+                return;
+            }
+
+            products[index] = updatedProduct;
+            SaveDocument(document);
+        }
+
+        private static bool ContainsMatchingFile(IEnumerable<BoothDownloadFile> files, BoothDownloadFile target)
+        {
+            return (files ?? Enumerable.Empty<BoothDownloadFile>()).Any(file => file != null &&
+                ((!string.IsNullOrEmpty(target.FileId) && file.FileId == target.FileId) ||
+                 (!string.IsNullOrEmpty(target.DownloadUrl) && file.DownloadUrl == target.DownloadUrl) ||
+                 (file.Kind == target.Kind && string.Equals(file.Name, target.Name, StringComparison.OrdinalIgnoreCase))));
         }
 
         public static BoothLibraryDocument ReplaceDatabaseWithProducts(IEnumerable<BoothProduct> products, int maxPage, bool initialFullSync, bool fullRefresh)

@@ -1602,8 +1602,11 @@ namespace VRCQuickImporter.Editor.UI
                     return;
                 }
 
-                var updatedProduct = (document.Products ?? new List<BoothProduct>())
-                    .FirstOrDefault(item => item != null && item.ProductId == _productBeingVerified.ProductId);
+                var matchingProducts = (document.Products ?? new List<BoothProduct>())
+                    .Where(item => item != null && item.ProductId == _productBeingVerified.ProductId)
+                    .ToList();
+                var updatedProduct = matchingProducts.FirstOrDefault(item =>
+                    FindUpdatedDownloadFile(_fileBeingVerified, item.Files) != null) ?? matchingProducts.FirstOrDefault();
                 if (updatedProduct != null)
                 {
                     ProcessVerifiedProduct(updatedProduct);
@@ -1732,11 +1735,13 @@ namespace VRCQuickImporter.Editor.UI
                 return;
             }
 
-            var filesChanged = !HaveSameFileStructure(_productBeingVerified.Files, updatedProduct.Files);
-            var metadataChanged = HasMetadataChanged(_productBeingVerified, updatedProduct);
             var updatedFile = FindUpdatedDownloadFile(_fileBeingVerified, updatedProduct.Files);
+            // 表示用カードは複数バリエーションのFilesを統合しているため、
+            // 確認対象のファイルが取得ページに残っているかだけを判定する。
+            var filesChanged = updatedFile == null;
+            var metadataChanged = HasMetadataChanged(_productBeingVerified, updatedProduct);
 
-            BoothLibraryStore.UpsertProductInPlace(updatedProduct);
+            BoothLibraryStore.UpsertProductInPlace(updatedProduct, _fileBeingVerified);
             FinishProductVerification();
 
             if (filesChanged || updatedFile == null)
@@ -1767,26 +1772,6 @@ namespace VRCQuickImporter.Editor.UI
                                              !string.IsNullOrWhiteSpace(item.FileId) &&
                                              !string.IsNullOrWhiteSpace(item.Name) &&
                                              !string.IsNullOrWhiteSpace(item.DownloadUrl));
-        }
-
-        private static bool HaveSameFileStructure(IEnumerable<BoothDownloadFile> current, IEnumerable<BoothDownloadFile> updated)
-        {
-            var currentSignatures = (current ?? Enumerable.Empty<BoothDownloadFile>())
-                .Where(item => item != null)
-                .Select(GetFileStructureSignature)
-                .OrderBy(signature => signature, StringComparer.Ordinal)
-                .ToArray();
-            var updatedSignatures = (updated ?? Enumerable.Empty<BoothDownloadFile>())
-                .Where(item => item != null)
-                .Select(GetFileStructureSignature)
-                .OrderBy(signature => signature, StringComparer.Ordinal)
-                .ToArray();
-            return currentSignatures.SequenceEqual(updatedSignatures, StringComparer.Ordinal);
-        }
-
-        private static string GetFileStructureSignature(BoothDownloadFile file)
-        {
-            return (file.FileId ?? string.Empty) + "\u001f" + NormalizeDownloadFileName(file.Name) + "\u001f" + (int)file.Kind;
         }
 
         private static BoothDownloadFile FindUpdatedDownloadFile(BoothDownloadFile requestedFile, IEnumerable<BoothDownloadFile> updatedFiles)
