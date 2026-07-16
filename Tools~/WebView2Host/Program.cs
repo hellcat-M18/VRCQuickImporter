@@ -729,17 +729,22 @@ internal sealed class BrowserForm : Form
     return row || button.parentElement;
   };
 
-  const fileNamePattern = /\.(?:unitypackage|zip|png|jpe?g|webp|gif|blend|fbx|obj|vrm|vrca|vpm|rar|7z|tar|gz|txt|pdf|mp3|wav|mp4|mov|avi|psd|ai|svg)$/i;
   const findFileName = (button, block) => {
     const row = findFileRow(button, block);
     if (!row) return '';
+
+    // BOOTHのファイル行は、左にファイル名列・右にDLボタン列を置く。
+    // 表示用CSSクラスや拡張子の一覧には依存せず、兄弟関係だけで左列を取得する。
+    for (const child of Array.from(row.children)) {
+      if (child.querySelector(downloadSelector)) continue;
+      const text = elementText(child);
+      if (text) return text;
+    }
+
+    // 旧レイアウト向けフォールバック。
     const copy = row.cloneNode(true);
     copy.querySelectorAll(downloadSelector).forEach(element => element.remove());
-    const lines = (copy.innerText || copy.textContent || '')
-      .split(/\r?\n/)
-      .map(normalize)
-      .filter(Boolean);
-    return lines.find(line => fileNamePattern.test(line)) || normalize(lines.join(' '));
+    return elementText(copy);
   };
 
   const itemAnchorsById = new Map();
@@ -751,6 +756,7 @@ internal sealed class BrowserForm : Form
   }
 
   const products = [];
+  const parserErrors = [];
   for (const [productId, anchors] of itemAnchorsById) {
     const anchor = anchors.find(item => elementText(item).length > 0) || anchors[0];
     const block = anchors.map(item => findProductBlock(item, productId)).find(Boolean);
@@ -773,7 +779,7 @@ internal sealed class BrowserForm : Form
 
     const image = Array.from(block.querySelectorAll('img'))
       .find(item => productIdForAnchor(item.closest(itemLinkSelector)) === productId) || block.querySelector('img');
-    const files = [];
+    let files = [];
     const seenDownloadUrls = new Set();
     for (const button of Array.from(block.querySelectorAll(downloadSelector))) {
       const downloadUrl = absoluteUrl(button.getAttribute('data-href'));
@@ -789,6 +795,12 @@ internal sealed class BrowserForm : Form
         DownloadUrl: downloadUrl
       });
       seenDownloadUrls.add(downloadUrl);
+    }
+
+    const expectedFileCount = block.querySelectorAll(downloadSelector).length;
+    if (files.length !== expectedFileCount) {
+      parserErrors.push(`商品 ${productId} のDLファイル抽出が不完全です（ボタン ${expectedFileCount} 件、ファイル名 ${files.length} 件）。`);
+      files = [];
     }
 
     products.push({
@@ -811,9 +823,11 @@ internal sealed class BrowserForm : Form
     });
   }
 
-  const parserError = itemAnchorsById.size > 0 && products.length === 0
-    ? '商品リンクは検出されましたが、商品ブロックを抽出できませんでした。BOOTHのページ構造が変更された可能性があります。'
-    : '';
+  const parserError = parserErrors.length > 0
+    ? parserErrors.join('\n')
+    : itemAnchorsById.size > 0 && products.length === 0
+      ? '商品リンクは検出されましたが、商品ブロックを抽出できませんでした。BOOTHのページ構造が変更された可能性があります。'
+      : '';
   return {
     SchemaVersion: '1',
     ParserVersion: '2',
