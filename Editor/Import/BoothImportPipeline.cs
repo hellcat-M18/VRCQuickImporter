@@ -14,6 +14,7 @@ namespace VRCQuickImporter.Editor.Import
     /// <summary>
     /// BOOTHファイルのダウンロード→解凍→インポートを統括するパイプライン。
     /// </summary>
+    [InitializeOnLoad]
     internal static class BoothImportPipeline
     {
         private const int DownloadTimeoutSeconds = 180;
