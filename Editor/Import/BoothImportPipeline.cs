@@ -17,8 +17,16 @@ namespace VRCQuickImporter.Editor.Import
     internal static class BoothImportPipeline
     {
         private const int DownloadTimeoutSeconds = 180;
+        private const string ImportingProductIdSessionKey = "VRCQuickImporter.importingProductId";
+        private const string PendingImportCountSessionKey = "VRCQuickImporter.pendingImportPackageCount";
+
         private static DateTime _activeDownloadStartedAt;
-        private static bool _importPackageHandlerRegistered;
+        private static bool _importPackageHandlersRegistered;
+
+        static BoothImportPipeline()
+        {
+            EnsureImportPackageHandlersRegistered();
+        }
 
         /// <summary>
         /// 指定した商品の指定ファイルをダウンロードしてインポートする。
@@ -186,7 +194,7 @@ namespace VRCQuickImporter.Editor.Import
             if (ext == ".unitypackage")
             {
                 // unitypackage を直接インポート
-                ImportUnityPackage(filePath);
+                ImportUnityPackage(filePath, product.ProductId);
             }
             else if (ext == ".zip")
             {
@@ -214,17 +222,17 @@ namespace VRCQuickImporter.Editor.Import
                 if (unityPackages.Length == 1)
                 {
                     // unitypackage 1つ → そのままインポート
-                    ImportUnityPackage(unityPackages[0]);
+                    ImportUnityPackage(unityPackages[0], product.ProductId);
                 }
                 else if (unityPackages.Length > 1)
                 {
                     // 複数のunitypackage → ユーザーに選択させる
-                    SelectAndImportUnityPackages(unityPackages, product.Name);
+                    SelectAndImportUnityPackages(unityPackages, product.Name, product.ProductId);
                 }
                 else
                 {
                     // unitypackageなし → Assets配下に展開
-                    DeployToAssets(extractDir, safeFileName);
+                    DeployToAssets(extractDir, safeFileName, product.ProductId);
                 }
             }
             else
@@ -242,30 +250,127 @@ namespace VRCQuickImporter.Editor.Import
         /// <summary>
         /// unitypackage をインポートする（Unity標準ダイアログあり）。
         /// </summary>
-        private static void ImportUnityPackage(string path)
+        private static void ImportUnityPackage(string path, string productId)
         {
             Debug.Log("[VRCQuickImporter] unitypackage をインポート: " + path);
 
-            if (!_importPackageHandlerRegistered)
+            EnsureImportPackageHandlersRegistered();
+            if (!string.IsNullOrEmpty(productId))
             {
-                AssetDatabase.importPackageCompleted += OnImportPackageCompleted;
-                _importPackageHandlerRegistered = true;
+                BeginPackageImport(productId);
+            }
+            AssetDatabase.ImportPackage(path, interactive: true);
+        }
+
+        private static void EnsureImportPackageHandlersRegistered()
+        {
+            if (_importPackageHandlersRegistered)
+            {
+                return;
             }
 
-            AssetDatabase.ImportPackage(path, interactive: true);
+            AssetDatabase.importPackageCompleted += OnImportPackageCompleted;
+            AssetDatabase.onImportPackageItemsCompleted += OnImportPackageItemsCompleted;
+            AssetDatabase.importPackageCancelled += OnImportPackageCancelled;
+            AssetDatabase.importPackageFailed += OnImportPackageFailed;
+            _importPackageHandlersRegistered = true;
         }
 
         private static void OnImportPackageCompleted(string packageName)
         {
+            if (string.IsNullOrEmpty(GetImportingProductId()))
+            {
+                return;
+            }
+
             BoothNotificationHelper.ShowNotification(
                 "VRCQuickImporter",
                 $"{Path.GetFileName(packageName)}のインポートが完了しました");
+            // onImportPackageItemsCompleted が同じ完了通知内で後から呼ばれる場合にも
+            // SessionStateのコンテキストを維持できるよう、次フレームで片付ける。
+            EditorApplication.delayCall += CompletePackageImport;
+        }
+
+        private static void OnImportPackageItemsCompleted(string[] importedAssetPaths)
+        {
+            var productId = GetImportingProductId();
+            if (string.IsNullOrEmpty(productId))
+            {
+                return;
+            }
+
+            var paths = CollectImportRootPaths(importedAssetPaths);
+            if (paths.Count > 0)
+            {
+                BoothImportHistoryStore.RecordImport(productId, paths);
+            }
+        }
+
+        private static void OnImportPackageCancelled(string packageName)
+        {
+            if (!string.IsNullOrEmpty(GetImportingProductId()))
+            {
+                CompletePackageImport();
+            }
+        }
+
+        private static void OnImportPackageFailed(string packageName, string errorMessage)
+        {
+            if (!string.IsNullOrEmpty(GetImportingProductId()))
+            {
+                CompletePackageImport();
+            }
+        }
+
+        private static void BeginPackageImport(string productId)
+        {
+            SessionState.SetString(ImportingProductIdSessionKey, productId ?? string.Empty);
+            SessionState.SetInt(PendingImportCountSessionKey, SessionState.GetInt(PendingImportCountSessionKey, 0) + 1);
+        }
+
+        private static string GetImportingProductId()
+        {
+            return SessionState.GetString(ImportingProductIdSessionKey, string.Empty);
+        }
+
+        private static void CompletePackageImport()
+        {
+            var pendingCount = Math.Max(0, SessionState.GetInt(PendingImportCountSessionKey, 0) - 1);
+            SessionState.SetInt(PendingImportCountSessionKey, pendingCount);
+            if (pendingCount == 0)
+            {
+                SessionState.SetString(ImportingProductIdSessionKey, string.Empty);
+            }
+        }
+
+        private static List<string> CollectImportRootPaths(IEnumerable<string> importedAssetPaths)
+        {
+            var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var assetPath in importedAssetPaths ?? Enumerable.Empty<string>())
+            {
+                var normalizedPath = (assetPath ?? string.Empty).Replace('\\', '/');
+                if (!normalizedPath.StartsWith("Assets/", StringComparison.Ordinal) || normalizedPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var segments = normalizedPath.Split('/');
+                var candidate = segments.Length <= 2
+                    ? normalizedPath
+                    : "Assets/" + segments[1];
+                if (AssetDatabase.IsValidFolder(candidate) || AssetDatabase.LoadMainAssetAtPath(candidate) != null)
+                {
+                    results.Add(candidate);
+                }
+            }
+
+            return results.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         /// <summary>
         /// 複数のunitypackageがある場合、インポート方法をユーザーに選択させる。
         /// </summary>
-        private static void SelectAndImportUnityPackages(string[] packages, string productName)
+        private static void SelectAndImportUnityPackages(string[] packages, string productName, string productId)
         {
             var choice = EditorUtility.DisplayDialogComplex(
                 "VRCQuickImporter - unitypackage選択",
@@ -279,13 +384,13 @@ namespace VRCQuickImporter.Editor.Import
             {
                 foreach (var pkg in packages)
                 {
-                    ImportUnityPackage(pkg);
+                    ImportUnityPackage(pkg, productId);
                 }
 
             }
             else if (choice == 2)
             {
-                SelectWindow.Open(packages, productName);
+                SelectWindow.Open(packages, productName, productId);
             }
         }
 
@@ -294,14 +399,16 @@ namespace VRCQuickImporter.Editor.Import
             private string[] _packages = Array.Empty<string>();
             private bool[] _selected = Array.Empty<bool>();
             private string _productName = string.Empty;
+            private string _productId = string.Empty;
             private Vector2 _scrollPosition;
 
-            public static void Open(string[] packages, string productName)
+            public static void Open(string[] packages, string productName, string productId)
             {
                 var window = GetWindow<SelectWindow>(true, "インポートするファイルを選択", true);
                 window._packages = packages ?? Array.Empty<string>();
                 window._selected = Enumerable.Repeat(true, window._packages.Length).ToArray();
                 window._productName = productName ?? string.Empty;
+                window._productId = productId ?? string.Empty;
 
                 var height = Mathf.Min(400, 140 + window._packages.Length * 24);
                 window.minSize = new Vector2(400, 160);
@@ -335,7 +442,7 @@ namespace VRCQuickImporter.Editor.Import
 
                     foreach (var pkg in toImport)
                     {
-                        ImportUnityPackage(pkg);
+                        ImportUnityPackage(pkg, _productId);
                     }
 
                 }
@@ -353,7 +460,7 @@ namespace VRCQuickImporter.Editor.Import
         /// <summary>
         /// zipの中身を Assets/BOOTH/{folderName}/ に展開する。
         /// </summary>
-        private static void DeployToAssets(string extractDir, string folderName)
+        private static void DeployToAssets(string extractDir, string folderName, string productId)
         {
             var assetsRoot = Path.GetFullPath("Assets");
             var targetDir = Path.Combine(assetsRoot, "BOOTH", folderName);
@@ -365,10 +472,12 @@ namespace VRCQuickImporter.Editor.Import
             AssetDatabase.Refresh();
             Debug.Log("[VRCQuickImporter] Assets配下に展開しました: " + targetDir);
 
-            var relativePath = "Assets/BOOTH/" + folderName;
+            var deployedFolderName = Path.GetFileName(targetDir);
+            var relativePath = "Assets/BOOTH/" + deployedFolderName;
+            BoothImportHistoryStore.RecordImport(productId, new List<string> { relativePath });
             BoothNotificationHelper.ShowNotification(
                 "VRCQuickImporter",
-                $"「{folderName}」を {relativePath} に展開しました");
+                $"「{deployedFolderName}」を {relativePath} に展開しました");
 
             // Projectウィンドウで開く
             var obj = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(relativePath);
@@ -380,7 +489,7 @@ namespace VRCQuickImporter.Editor.Import
 
             EditorUtility.DisplayDialog(
                 "VRCQuickImporter",
-                $"「{folderName}」を Assets/BOOTH/{folderName}/ に展開しました。\n" +
+                $"「{deployedFolderName}」を {relativePath}/ に展開しました。\n" +
                 $"AssetDatabaseを更新しました。",
                 "OK");
 
