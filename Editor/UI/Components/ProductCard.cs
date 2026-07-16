@@ -120,7 +120,7 @@ namespace VRCQuickImporter.Editor.UI
             VRCQuickImporterTheme.SetBorderRadius(content, VRCQuickImporterTheme.RadiusCardInner);
             overlay.Add(content);
 
-            var title = new Label("インポート先を選択");
+            var title = new Label("対象アセットを選択");
             BoothFontProvider.Apply(title, FontStyle.Bold);
             title.style.color = VRCQuickImporterTheme.TextPrimary;
             title.style.fontSize = VRCQuickImporterTheme.FontBody;

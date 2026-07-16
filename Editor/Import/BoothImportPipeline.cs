@@ -465,7 +465,10 @@ namespace VRCQuickImporter.Editor.Import
         {
             var assetsRoot = Path.GetFullPath("Assets");
             var targetDir = Path.Combine(assetsRoot, "BOOTH", folderName);
-            targetDir = MakeUniquePath(targetDir);
+            if (Directory.Exists(targetDir))
+            {
+                Directory.Delete(targetDir, true);
+            }
 
             // フォルダをコピー
             CopyDirectory(extractDir, targetDir);
