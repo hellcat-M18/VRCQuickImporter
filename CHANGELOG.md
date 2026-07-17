@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2
+
+### Changed
+- 計画用ディレクトリを AGENTS/ → .agents/ にリネーム（Unity Export Package で自動除外されるように）
+- ヘルパーバイナリ配置を Editor/Helpers~/ → Editor/Helpers/ に変更（Export Package に同梱）
+- .gitignore を Assetモデル用に整理（VPM時代の不要ルール削除）
+
+### Fixed
+- ダウンロード後にhelperプロセスが終了しないレアバグの安全弁を追加（Unity側: 10秒待って強制Kill、Helper側: 二重Close防止）
+- 未追跡の .meta ファイルを追加（Unity Package で必要）
+
 ## 0.2.1
 
 ### Added
