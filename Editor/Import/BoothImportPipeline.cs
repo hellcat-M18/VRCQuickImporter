@@ -22,6 +22,7 @@ namespace VRCQuickImporter.Editor.Import
         private const string PendingImportCountSessionKey = "VRCQuickImporter.pendingImportPackageCount";
 
         private static DateTime _activeDownloadStartedAt;
+        private static DateTime? _downloadFileFirstSeenAt;
         private static bool _importPackageHandlersRegistered;
 
         static BoothImportPipeline()
@@ -62,6 +63,7 @@ namespace VRCQuickImporter.Editor.Import
                 return;
             }
 
+            _downloadFileFirstSeenAt = null;
             var process = WebView2HostLauncher.StartDownload(file.DownloadUrl, downloadPath, headless: true);
             if (process == null)
             {
@@ -89,12 +91,25 @@ namespace VRCQuickImporter.Editor.Import
                         {
                             EditorApplication.update -= PollDownload;
                             try { process.Kill(); } catch { }
+                            _downloadFileFirstSeenAt = null;
                             EditorUtility.ClearProgressBar();
                             EditorUtility.DisplayDialog(
                                 "VRCQuickImporter",
                                 "ダウンロードがタイムアウトしました。",
                                 "OK");
                             return;
+                        }
+
+                        // ダウンロードファイルが存在するのにプロセスが終了しない場合の安全弁
+                        if (File.Exists(downloadPath))
+                        {
+                            _downloadFileFirstSeenAt ??= DateTime.UtcNow;
+                            if ((DateTime.UtcNow - _downloadFileFirstSeenAt.Value).TotalSeconds > 10)
+                            {
+                                try { process.Kill(); } catch { }
+                                _downloadFileFirstSeenAt = null;
+                                return; // 次のフレームでHasExitedがtrueになり、通常処理に進む
+                            }
                         }
 
                         // 進捗ファイルを読んで表示
@@ -145,11 +160,13 @@ namespace VRCQuickImporter.Editor.Import
                 catch
                 {
                     EditorApplication.update -= PollDownload;
+                    _downloadFileFirstSeenAt = null;
                     EditorUtility.ClearProgressBar();
                     return;
                 }
 
                 EditorApplication.update -= PollDownload;
+                _downloadFileFirstSeenAt = null;
                 EditorUtility.ClearProgressBar();
 
                 if (!File.Exists(downloadPath))
