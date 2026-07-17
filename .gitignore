@@ -1,9 +1,5 @@
 # Repository: VRCQuickImporter (Asset-based, repo root = Assets/VRCQuickImporter/)
 
-# Planning notes
-/AGENTS/
-/AGENTS.meta
-
 # Helper build artifacts
 /Tools~/WebView2Host/bin/
 /Tools~/WebView2Host/obj/
