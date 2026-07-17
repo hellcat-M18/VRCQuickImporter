@@ -13,13 +13,10 @@ namespace VRCQuickImporter.Editor.Import
         private static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATA lpdata);
 
         private const uint NIM_ADD = 0;
-        private const uint NIM_MODIFY = 1;
         private const uint NIM_DELETE = 2;
         private const uint NIF_ICON = 0x2;
         private const uint NIF_INFO = 0x10;
         private const uint NIIF_INFO = 1;
-        private const uint NIIF_NONE = 0;
-        private static readonly IntPtr IDI_APPLICATION = new IntPtr(32512);
         private static readonly IntPtr IDI_INFORMATION = new IntPtr(32516);
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]

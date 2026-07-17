@@ -17,7 +17,6 @@ namespace VRCQuickImporter.Editor.UI
         public const int SpaceMd = 8;
         public const int SpaceLg = 12;
         public const int SpaceXl = 16;
-        public const int SpaceXxl = 24;
 
         // ---- Radius ----
         public const float RadiusCardOuter = 12f;
@@ -31,7 +30,6 @@ namespace VRCQuickImporter.Editor.UI
         public const float CardShopHeight = 18f;
 
         // ---- Typography sizes ----
-        public const int FontTitle = 20;
         public const int FontSection = 15;
         public const int FontCardName = 13;
         public const int FontBody = 12;
@@ -66,10 +64,6 @@ namespace VRCQuickImporter.Editor.UI
             ? new Color(1f, 1f, 1f, 0.18f)
             : new Color(0f, 0f, 0f, 0.16f);
 
-        public static Color BorderStrong => IsProSkin
-            ? new Color(1f, 1f, 1f, 0.12f)
-            : new Color(0f, 0f, 0f, 0.12f);
-
         // ---- Thumbnail ----
         public static Color ThumbnailSurface => IsProSkin
             ? new Color(0.12f, 0.12f, 0.12f, 1f)
@@ -87,10 +81,6 @@ namespace VRCQuickImporter.Editor.UI
         public static Color TextMuted => IsProSkin
             ? new Color(0.62f, 0.62f, 0.62f, 1f)
             : new Color(0.38f, 0.38f, 0.38f, 1f);
-
-        public static Color TextFaint => IsProSkin
-            ? new Color(0.46f, 0.46f, 0.46f, 1f)
-            : new Color(0.55f, 0.55f, 0.55f, 1f);
 
         // ---- Accent (BOOTH / VRChat 緑) ----
         public static Color Accent => new Color(0.11f, 0.62f, 0.54f, 1f);

@@ -26,7 +26,6 @@ namespace VRCQuickImporter.Editor.UI
     {
         private Process _librarySyncProcess;
         private DateTime _librarySyncStartedAtUtc;
-        private string _libraryStatusOverride = string.Empty;
         private bool _librarySyncInProgress;
         private bool _fullRefreshInProgress;
         private int _fullRefreshCompletedPage;
@@ -43,7 +42,7 @@ namespace VRCQuickImporter.Editor.UI
         private LibrarySyncMode _syncMode = LibrarySyncMode.Incremental;
         private HashSet<string> _knownProductIdsBeforeSync = new HashSet<string>();
         private readonly List<BoothProduct> _syncCollectedProducts = new List<BoothProduct>();
-        private int _syncNewProductCount;
+        private readonly HashSet<string> _syncNewProductIds = new HashSet<string>();
         private int _syncFetchedPageCount;
         private bool _librarySyncWaitingForRateLimit;
         private DateTime _librarySyncLaunchAtUtc;
@@ -158,7 +157,7 @@ namespace VRCQuickImporter.Editor.UI
             }
 
             EnsureProductNameSearchLoaded();
-            var products = MergeProductsForDisplay(BoothLibraryStore.LoadProducts(out _, out var dataState));
+            var products = MergeProductsForDisplay(BoothLibraryStore.LoadProducts(out var dataState));
             var searchActive = IsProductNameSearchActive() && products.Count > 0;
             var filteredProducts = searchActive ? FilterProductsByName(products) : products;
 
@@ -1053,7 +1052,7 @@ namespace VRCQuickImporter.Editor.UI
             }
 
             BoothLibraryStore.DeletePendingPage();
-            FinishLibrarySync(GetSyncModeLabel(_syncMode) + "をキャンセルしました。ローカルJSONキャッシュは変更していません。", keepOverride: true);
+            FinishLibrarySync(GetSyncModeLabel(_syncMode) + "をキャンセルしました。ローカルJSONキャッシュは変更していません。");
         }
 
         private static bool ConfirmInitialSetup()
@@ -1083,7 +1082,7 @@ namespace VRCQuickImporter.Editor.UI
             _syncRequestedPage = 1;
             _knownProductIdsBeforeSync = BoothLibraryStore.LoadKnownProductIds();
             _syncCollectedProducts.Clear();
-            _syncNewProductCount = 0;
+            _syncNewProductIds.Clear();
             _syncFetchedPageCount = 0;
             _fullRefreshInProgress = mode == LibrarySyncMode.FullRefresh || mode == LibrarySyncMode.InitialSetup;
             _fullRefreshCompletedPage = 0;
@@ -1092,14 +1091,12 @@ namespace VRCQuickImporter.Editor.UI
             _librarySyncInProgress = true;
             _librarySyncProcess = null;
             _librarySyncStartedAtUtc = DateTime.UtcNow;
-            _libraryStatusOverride = GetSyncModeLabel(mode) + "を開始します...";
 
             var wait = GetRemainingBoothLibraryAccessWait();
             if (wait > TimeSpan.Zero)
             {
                 _librarySyncWaitingForRateLimit = true;
                 _librarySyncLaunchAtUtc = DateTime.UtcNow.Add(wait);
-                _libraryStatusOverride = $"BOOTHへの次のアクセスまで {wait.TotalSeconds:F1} 秒待機中...";
             }
             else
             {
@@ -1121,8 +1118,6 @@ namespace VRCQuickImporter.Editor.UI
             _librarySyncWaitingForRateLimit = false;
             _librarySyncLaunchAtUtc = DateTime.MinValue;
             _librarySyncStartedAtUtc = DateTime.UtcNow;
-            _libraryStatusOverride = (_showSyncWindow ? "WebView2 helperで" : "バックグラウンドで") +
-                                     GetSyncModeLabel(_syncMode) + " - ページ" + _syncRequestedPage + "を取得中...";
             if (_fullRefreshInProgress)
             {
                 _fullRefreshProgressText = _fullRefreshCompletedPage > 0
@@ -1143,7 +1138,6 @@ namespace VRCQuickImporter.Editor.UI
                     _fullRefreshProductCount = 0;
                     _fullRefreshProgressText = string.Empty;
                 }
-                _libraryStatusOverride = "WebView2 helperの起動に失敗しました。";
                 RefreshWindow();
                 return false;
             }
@@ -1222,7 +1216,6 @@ namespace VRCQuickImporter.Editor.UI
                 var remaining = _librarySyncLaunchAtUtc - DateTime.UtcNow;
                 if (remaining > TimeSpan.Zero)
                 {
-                    _libraryStatusOverride = $"BOOTHへの次のアクセスまで {remaining.TotalSeconds:F1} 秒待機中...";
                     return;
                 }
 
@@ -1247,7 +1240,7 @@ namespace VRCQuickImporter.Editor.UI
 
             if (_librarySyncProcess == null)
             {
-                FinishLibrarySync("BOOTHライブラリの取得状態を確認できませんでした。", keepOverride: true);
+                FinishLibrarySync("BOOTHライブラリの取得状態を確認できませんでした。");
                 return;
             }
 
@@ -1255,14 +1248,14 @@ namespace VRCQuickImporter.Editor.UI
             {
                 if (_librarySyncProcess.HasExited)
                 {
-                    FinishLibrarySync("WebView2 helperが終了しました。データが作成されていない場合は、BOOTHにログイン済みか確認してもう一度お試しください。", keepOverride: true);
+                    FinishLibrarySync("WebView2 helperが終了しました。データが作成されていない場合は、BOOTHにログイン済みか確認してもう一度お試しください。");
                     return;
                 }
             }
             catch (Exception ex)
             {
                 Debug.LogWarning("[VRCQuickImporter] 同期プロセス監視に失敗しました: " + ex.Message);
-                FinishLibrarySync("同期プロセス監視に失敗しました。", keepOverride: true);
+                FinishLibrarySync("同期プロセス監視に失敗しました。");
                 return;
             }
 
@@ -1280,7 +1273,7 @@ namespace VRCQuickImporter.Editor.UI
                     Debug.LogWarning("[VRCQuickImporter] 同期プロセスのタイムアウト終了に失敗しました: " + ex.Message);
                 }
 
-                FinishLibrarySync("BOOTHライブラリの取得がタイムアウトしました。ログイン状態を確認するため、「同期ウインドウを表示」をオンにして再実行してください。", keepOverride: true);
+                FinishLibrarySync("BOOTHライブラリの取得がタイムアウトしました。ログイン状態を確認するため、「同期ウインドウを表示」をオンにして再実行してください。");
             }
         }
 
@@ -1293,7 +1286,7 @@ namespace VRCQuickImporter.Editor.UI
             {
                 Debug.LogWarning("[VRCQuickImporter] BOOTHライブラリ抽出エラー: " + parserError);
                 BoothLibraryStore.DeletePendingPage();
-                FinishLibrarySync("BOOTHライブラリのページ構造を解析できませんでした。既存のローカルJSONキャッシュは変更していません。", keepOverride: true);
+                FinishLibrarySync("BOOTHライブラリのページ構造を解析できませんでした。既存のローカルJSONキャッシュは変更していません。");
                 return;
             }
 
@@ -1301,7 +1294,7 @@ namespace VRCQuickImporter.Editor.UI
             if (pending == null)
             {
                 BoothLibraryStore.DeletePendingPage();
-                FinishLibrarySync("同期データの読み込みに失敗しました。", keepOverride: true);
+                FinishLibrarySync("同期データの読み込みに失敗しました。");
                 return;
             }
 
@@ -1312,8 +1305,7 @@ namespace VRCQuickImporter.Editor.UI
                 .Select(p => p.ProductId)
                 .ToList();
             var overlapsKnown = pageIds.Any(id => _knownProductIdsBeforeSync.Contains(id));
-            var newOnThisPage = pageIds.Count(id => !_knownProductIdsBeforeSync.Contains(id));
-            _syncNewProductCount += newOnThisPage;
+            _syncNewProductIds.UnionWith(pageIds.Where(id => !_knownProductIdsBeforeSync.Contains(id)));
             _syncFetchedPageCount = Math.Max(_syncFetchedPageCount, _syncRequestedPage);
 
             if (_syncMode == LibrarySyncMode.Incremental)
@@ -1327,7 +1319,6 @@ namespace VRCQuickImporter.Editor.UI
 
                 if (pageHadProducts && !overlapsKnown && _syncRequestedPage < MaxSmartSyncPages)
                 {
-                    _libraryStatusOverride = "増分同期: ページ" + _syncRequestedPage + "で既存商品と重ならなかったため、次ページを確認します。";
                     QueueNextLibrarySyncPage();
                     return;
                 }
@@ -1351,7 +1342,7 @@ namespace VRCQuickImporter.Editor.UI
                     : pageHadProducts
                         ? "安全上限に到達したため停止しました。"
                         : "空ページに到達したため停止しました。";
-                FinishLibrarySync("増分同期が完了しました（新規候補 " + _syncNewProductCount + "件 / 確認ページ " + _syncFetchedPageCount + "）。" + reason);
+                FinishLibrarySync("増分同期が完了しました（新規候補 " + _syncNewProductIds.Count + "件 / 確認ページ " + _syncFetchedPageCount + "）。" + reason);
                 return;
             }
 
@@ -1360,7 +1351,11 @@ namespace VRCQuickImporter.Editor.UI
                 _syncCollectedProducts.AddRange(pageProducts);
                 if (_fullRefreshInProgress)
                 {
-                    UpdateProgressBar(_syncRequestedPage, _syncCollectedProducts.Count);
+                    UpdateProgressBar(_syncRequestedPage, _syncCollectedProducts
+                        .Where(product => product != null && !string.IsNullOrEmpty(product.ProductId))
+                        .Select(product => product.ProductId)
+                        .Distinct()
+                        .Count());
                 }
             }
 
@@ -1368,21 +1363,20 @@ namespace VRCQuickImporter.Editor.UI
 
             if (pageHadProducts && _syncRequestedPage < MaxSmartSyncPages)
             {
-                _libraryStatusOverride = GetSyncModeLabel(_syncMode) + ": ページ" + _syncRequestedPage + "を取得しました（" + pageProducts.Count + "件）。次ページを取得します。";
                 QueueNextLibrarySyncPage();
                 return;
             }
 
             if (pageHadProducts && _syncRequestedPage >= MaxSmartSyncPages)
             {
-                FinishLibrarySync(GetSyncModeLabel(_syncMode) + "を安全上限で停止しました。既存のローカルJSONキャッシュは変更していません（取得済み " + _syncCollectedProducts.Count + "件 / ページ" + _syncRequestedPage + "まで）。", keepOverride: true);
+                FinishLibrarySync(GetSyncModeLabel(_syncMode) + "を安全上限で停止しました。既存のローカルJSONキャッシュは変更していません（取得済み " + _syncCollectedProducts.Count + "件 / ページ" + _syncRequestedPage + "まで）。");
                 return;
             }
 
             var maxPage = Math.Max(0, _syncRequestedPage - 1);
             if (_syncMode == LibrarySyncMode.FullRefresh && _syncCollectedProducts.Count == 0 && BoothLibraryStore.HasDatabase)
             {
-                FinishLibrarySync("完全リフレッシュで商品を取得できなかったため、既存のローカルJSONキャッシュは変更していません。ログイン状態やBOOTH側の表示を確認してください。", keepOverride: true);
+                FinishLibrarySync("完全リフレッシュで商品を取得できなかったため、既存のローカルJSONキャッシュは変更していません。ログイン状態やBOOTH側の表示を確認してください。");
                 return;
             }
 
@@ -1407,7 +1401,6 @@ namespace VRCQuickImporter.Editor.UI
             {
                 _librarySyncWaitingForRateLimit = true;
                 _librarySyncLaunchAtUtc = DateTime.UtcNow.Add(wait);
-                _libraryStatusOverride = $"BOOTHへの次のアクセスまで {wait.TotalSeconds:F1} 秒待機中...";
                 RefreshWindow();
                 return;
             }
@@ -1436,7 +1429,7 @@ namespace VRCQuickImporter.Editor.UI
             }
         }
 
-        private void FinishLibrarySync(string message, bool keepOverride = true)
+        private void FinishLibrarySync(string message)
         {
             EditorApplication.update -= PollLibrarySync;
             _librarySyncInProgress = false;
@@ -1452,7 +1445,7 @@ namespace VRCQuickImporter.Editor.UI
                 _fullRefreshProgressText = string.Empty;
             }
             _syncCollectedProducts.Clear();
-            _libraryStatusOverride = keepOverride ? message : string.Empty;
+            _syncNewProductIds.Clear();
             Debug.Log("[VRCQuickImporter] " + message);
 
             if (ShouldShowSyncResultDialog(message))
@@ -1929,6 +1922,23 @@ namespace VRCQuickImporter.Editor.UI
         {
             HideImportPathOverlays();
             AbortProductVerification();
+
+            try
+            {
+                if (_librarySyncProcess != null && !_librarySyncProcess.HasExited)
+                {
+                    _librarySyncProcess.Kill();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] 同期プロセスの終了に失敗しました: " + ex.Message);
+            }
+            finally
+            {
+                _librarySyncProcess = null;
+            }
+
             EditorApplication.update -= PollLibrarySync;
         }
 

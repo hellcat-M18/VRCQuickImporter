@@ -108,14 +108,14 @@ namespace VRCQuickImporter.Editor.Import
                                 var doc = JsonUtility.FromJson<DownloadProgressInfo>(json);
                                 if (doc != null && !string.IsNullOrEmpty(doc.status))
                                 {
-                                    if (doc.percent >= 0)
+                                    if (doc.status == "started")
+                                    {
+                                        progressText = "ダウンロード準備中...";
+                                    }
+                                    else if (doc.percent >= 0)
                                     {
                                         progressText = $"ダウンロード中... {doc.percent}%";
                                         pct = doc.percent / 100f;
-                                    }
-                                    else if (doc.status == "started")
-                                    {
-                                        progressText = "ダウンロード準備中...";
                                     }
                                     else if (doc.status == "downloading")
                                     {
@@ -185,7 +185,6 @@ namespace VRCQuickImporter.Editor.Import
         private static void ProcessDownloadedFile(string filePath, BoothProduct product, BoothDownloadFile file)
         {
             var ext = Path.GetExtension(filePath).ToLowerInvariant();
-            var safeProductName = SanitizeForFolderName(product.Name);
             var safeFileName = Path.GetFileNameWithoutExtension(file.Name);
             if (string.IsNullOrEmpty(safeFileName))
             {
@@ -499,20 +498,6 @@ namespace VRCQuickImporter.Editor.Import
 
         }
 
-        private static string SanitizeForFolderName(string name)
-        {
-            if (string.IsNullOrEmpty(name)) return "BOOTH_Item";
-            var invalid = Path.GetInvalidFileNameChars();
-            var result = name;
-            foreach (var c in invalid)
-            {
-                result = result.Replace(c, '_');
-            }
-            // 長すぎる名前を切り詰める
-            if (result.Length > 60) result = result.Substring(0, 60);
-            return result.Trim();
-        }
-
         private static string MakeUniquePath(string path)
         {
             if (!Directory.Exists(path) && !File.Exists(path)) return path;
@@ -582,8 +567,6 @@ namespace VRCQuickImporter.Editor.Import
             public int percent = -1;
             public long bytesReceived;
             public long bytesTotal;
-            public string outputPath = string.Empty;
-            public string updatedAt = string.Empty;
         }
     }
 }

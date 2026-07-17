@@ -110,7 +110,7 @@ internal sealed class BrowserForm : Form
         toolbar.Controls.Add(MakeButton("再読込", 70, (_, _) => Reload()));
         toolbar.Controls.Add(MakeButton("ログイン", 80, (_, _) => Navigate("https://accounts.booth.pm/users/sign_in")));
 
-        _syncButton = MakeButton("同期", 70, async (_, _) => await SyncLibraryAsync(manual: true));
+        _syncButton = MakeButton("同期", 70, async (_, _) => await SyncLibraryAsync());
         _syncButton.ToolTipText("BOOTHライブラリページから商品候補を抽出してUnity用database.jsonへ保存します");
         toolbar.Controls.Add(_syncButton);
 
@@ -537,7 +537,7 @@ internal sealed class BrowserForm : Form
         catch { }
     }
 
-    private async Task SyncLibraryAsync(bool manual)
+    private async Task SyncLibraryAsync()
     {
         await SyncSingleLibraryPageAsync();
     }

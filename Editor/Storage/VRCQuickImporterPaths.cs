@@ -8,8 +8,6 @@ namespace VRCQuickImporter.Editor.Storage
 {
     internal static class VRCQuickImporterPaths
     {
-        private const string PackageName = "tool.hellcat.vrc-quick-importer";
-
         public static string ProjectRoot => Directory.GetParent(Application.dataPath)?.FullName ?? Directory.GetCurrentDirectory();
 
         public static string DataRoot => Path.Combine(ProjectRoot, "Library", "VRCQuickImporter");

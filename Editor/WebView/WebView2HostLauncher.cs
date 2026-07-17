@@ -153,7 +153,7 @@ namespace VRCQuickImporter.Editor.WebView
                 EditorUtility.DisplayDialog(
                     "VRCQuickImporter",
                     "WebView2 helper exe の起動に失敗しました。\n\n" + ex.Message +
-                    "\n\n.NET 8 Desktop Runtime と WebView2 Runtime が必要です。",
+                    "\n\nWebView2 Runtime が必要です。",
                     "OK");
                 return null;
             }

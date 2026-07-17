@@ -17,12 +17,11 @@ namespace VRCQuickImporter.Editor.Library
 
     internal static class BoothLibraryStore
     {
-        public static List<BoothProduct> LoadProducts(out string statusText, out BoothLibraryDataState state)
+        public static List<BoothProduct> LoadProducts(out BoothLibraryDataState state)
         {
             if (!File.Exists(VRCQuickImporterPaths.DatabasePath))
             {
                 state = BoothLibraryDataState.MissingDatabase;
-                statusText = "まだ同期されていません。右上の「BOOTHと同期」から購入履歴を取得してください。";
                 return new List<BoothProduct>();
             }
 
@@ -33,57 +32,19 @@ namespace VRCQuickImporter.Editor.Library
                 if (document?.Products == null || document.Products.Count == 0)
                 {
                     state = BoothLibraryDataState.Empty;
-                    statusText = "同期済みデータに商品がありません。BOOTHログイン状態や購入履歴を確認してください。";
                     return new List<BoothProduct>();
                 }
 
                 NormalizeDocument(document);
 
                 state = BoothLibraryDataState.Ready;
-                statusText = string.IsNullOrEmpty(document.SyncedAt)
-                    ? "同期済みデータを表示しています。"
-                    : "同期済みデータを表示しています。最終同期: " + document.SyncedAt;
                 return document.Products;
             }
             catch (Exception ex)
             {
                 Debug.LogWarning("[VRCQuickImporter] database.json の読み込みに失敗しました: " + ex.Message);
                 state = BoothLibraryDataState.Error;
-                statusText = "database.json の読み込みに失敗しました。詳細設定からデータフォルダを確認してください。";
                 return new List<BoothProduct>();
-            }
-        }
-
-        public static List<BoothProduct> LoadProductsOrMock(out string statusText)
-        {
-            if (!File.Exists(VRCQuickImporterPaths.DatabasePath))
-            {
-                statusText = "database.json がまだ無いため、サンプル商品を表示しています。";
-                return BoothLibraryMockData.CreateSampleProducts();
-            }
-
-            try
-            {
-                var json = File.ReadAllText(VRCQuickImporterPaths.DatabasePath);
-                var document = JsonUtility.FromJson<BoothLibraryDocument>(json);
-                if (document?.Products == null || document.Products.Count == 0)
-                {
-                    statusText = "同期済みデータに商品が無いため、サンプル商品を表示しています。";
-                    return BoothLibraryMockData.CreateSampleProducts();
-                }
-
-                NormalizeDocument(document);
-
-                statusText = string.IsNullOrEmpty(document.SyncedAt)
-                    ? "同期済みデータを表示しています。"
-                    : "同期済みデータを表示しています。最終同期: " + document.SyncedAt;
-                return document.Products;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[VRCQuickImporter] database.json の読み込みに失敗しました: " + ex.Message);
-                statusText = "database.json の読み込みに失敗したため、サンプル商品を表示しています。";
-                return BoothLibraryMockData.CreateSampleProducts();
             }
         }
 
@@ -282,7 +243,8 @@ namespace VRCQuickImporter.Editor.Library
 
         private static BoothLibraryDocument TryLoadDocument(string path)
         {
-            for (var attempt = 0; attempt < 5; attempt++)
+            var attempt = 0;
+            while (true)
             {
                 try
                 {
@@ -296,14 +258,15 @@ namespace VRCQuickImporter.Editor.Library
                 {
                     if (attempt < 4)
                     {
+                        attempt++;
                         System.Threading.Thread.Sleep(200);
                         continue;
                     }
+
                     Debug.LogWarning("[VRCQuickImporter] ドキュメントの読み込みに失敗しました: " + ex.Message);
                     return null;
                 }
             }
-            return null;
         }
 
         private static void SaveDocument(BoothLibraryDocument document)
