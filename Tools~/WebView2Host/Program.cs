@@ -51,6 +51,7 @@ internal sealed class BrowserForm : Form
     private bool _syncRunning;
     private CoreWebView2DownloadOperation _currentDownload;
     private TaskCompletionSource<bool> _downloadCompletionSource;
+    private bool _isClosing;
     private int _blockedLightweightResourceCount;
 
     public BrowserForm(HostOptions options)
@@ -457,6 +458,7 @@ internal sealed class BrowserForm : Form
         if (string.IsNullOrEmpty(url))
         {
             _statusLabel.Text = "ダウンロードURLが無効です。";
+            BeginInvoke(new MethodInvoker(SafeClose));
             return;
         }
 
@@ -479,7 +481,18 @@ internal sealed class BrowserForm : Form
         }
 
         await Task.Delay(500);
-        BeginInvoke(new MethodInvoker(Close));
+        BeginInvoke(new MethodInvoker(SafeClose));
+    }
+
+    private void SafeClose()
+    {
+        if (_isClosing)
+        {
+            return;
+        }
+
+        _isClosing = true;
+        Close();
     }
 
     private void OnDownloadStateChanged(object sender, object e)
@@ -492,14 +505,14 @@ internal sealed class BrowserForm : Form
             _statusLabel.Text = "ダウンロード完了: " + _options.OutputPath;
             WriteProgress(100, 0, 100, "completed");
             _downloadCompletionSource?.TrySetResult(true);
-            BeginInvoke(new MethodInvoker(Close));
+            BeginInvoke(new MethodInvoker(SafeClose));
         }
         else if (state == CoreWebView2DownloadState.Interrupted)
         {
             _statusLabel.Text = "ダウンロードが中断されました。";
             WriteProgress(0, 0, 0, "interrupted");
             _downloadCompletionSource?.TrySetResult(false);
-            BeginInvoke(new MethodInvoker(Close));
+            BeginInvoke(new MethodInvoker(SafeClose));
         }
     }
 
