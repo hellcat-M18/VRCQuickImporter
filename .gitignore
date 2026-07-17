@@ -1,40 +1,13 @@
-# This repository tracks VRCQuickImporter package development only.
+# Repository: VRCQuickImporter (Asset-based, repo root = Assets/VRCQuickImporter/)
 
-# Agent/private planning notes
-Packages/tool.hellcat.vrc-quick-importer/AGENTS/
-Packages/tool.hellcat.vrc-quick-importer/AGENTS.meta
-Packages/tool.hellcat.vrc-quick-importer/AGENTS/**/*.meta
-
-# Local build outputs and debug symbols for helper tools
-Packages/tool.hellcat.vrc-quick-importer/Tools~/WebView2Host/bin/
-Packages/tool.hellcat.vrc-quick-importer/Tools~/WebView2Host/obj/
-*.pdb
-
-# Unity generated folders
-Library/
-Temp/
-Logs/
-UserSettings/
-
-# Existing local Unity project contents not related to this package
-Assets/
-ProjectSettings/
-Packages/*
-!Packages/tool.hellcat.vrc-quick-importer/
-!Packages/tool.hellcat.vrc-quick-importer/**
-
-# Local/reference material outside the package
-instant-meshes/
-vpm-package-template/
-lace-handoff-prompt.md
-plan.md
-
-# Package-root agent/private planning notes
+# Planning notes
 /AGENTS/
 /AGENTS.meta
 
-# Package-root local build outputs and debug symbols for helper tools
+# Helper build artifacts
 /Tools~/WebView2Host/bin/
 /Tools~/WebView2Host/obj/
 /Tools~/WebView2Host/publish/
+
+# Debug symbols
 *.pdb
