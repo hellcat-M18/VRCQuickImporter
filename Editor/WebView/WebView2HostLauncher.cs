@@ -325,7 +325,7 @@ namespace VRCQuickImporter.Editor.WebView
         {
             var packageRoot = VRCQuickImporterPaths.GetPackageRoot();
             packageRoot = VRCQuickImporterPaths.ToAbsoluteAssetPath(packageRoot);
-            return Path.Combine(packageRoot, "Editor", "Helpers~", "WebView2Host", "win-x64", HostExeName);
+            return Path.Combine(packageRoot, "Editor", "Helpers", "WebView2Host", "win-x64", HostExeName);
         }
 
         private static string Arg(string key, string value)
