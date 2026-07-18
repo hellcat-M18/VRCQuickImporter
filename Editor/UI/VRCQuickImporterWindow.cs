@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -56,6 +57,7 @@ namespace VRCQuickImporter.Editor.UI
         private string _productVerificationOutputPath = string.Empty;
         private DateTime _productVerificationPageStartedAtUtc;
         private bool _productVerificationInProgress;
+        private VisualElement _updateBanner;
 
         internal event System.Action<BoothProduct, BoothDownloadFile> OnImportRequested;
 
@@ -71,6 +73,8 @@ namespace VRCQuickImporter.Editor.UI
         private const int CardSpacing = 10;
         private const int GridPadding = 10;
         private const int MaxSmartSyncPages = 50;
+        private const string BoothProductPageUrl = "https://hellcat.booth.pm/items/8616786";
+        private const string GitHubReleasesApiUrl = "https://api.github.com/repos/hellcat-M18/VRCQuickImporter/releases/latest";
 
         [Serializable]
         private sealed class LibraryExtractionStatus
@@ -110,6 +114,8 @@ namespace VRCQuickImporter.Editor.UI
             container.Add(BuildHeader());
             container.Add(BuildLibrarySection());
             container.Add(BuildAdvancedSection());
+
+            CheckForUpdateAsync();
         }
 
         private VisualElement BuildHeader()
@@ -126,6 +132,141 @@ namespace VRCQuickImporter.Editor.UI
             wrap.Add(subtitle);
 
             return wrap;
+        }
+
+        private async void CheckForUpdateAsync()
+        {
+            try
+            {
+                using var client = new HttpClient();
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("VRCQuickImporter");
+                var json = await client.GetStringAsync(GitHubReleasesApiUrl);
+                var tagName = ExtractJsonString(json, "tag_name");
+                if (string.IsNullOrEmpty(tagName) || !tagName.StartsWith("v", StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                var latestVersion = tagName.Substring(1);
+                if (IsNewerVersion(latestVersion, GetCurrentVersion()))
+                {
+                    ShowUpdateBanner(latestVersion);
+                }
+            }
+            catch
+            {
+                // ネットワークエラー時もツールの通常動作には影響させない。
+            }
+        }
+
+        private static string GetCurrentVersion()
+        {
+            try
+            {
+                var packageRoot = VRCQuickImporterPaths.GetPackageRoot();
+                var versionPath = VRCQuickImporterPaths.ToAbsoluteAssetPath(Path.Combine(packageRoot, "VERSION"));
+                if (File.Exists(versionPath))
+                {
+                    return File.ReadAllText(versionPath).Trim();
+                }
+            }
+            catch
+            {
+                // VERSIONを読めない場合は更新通知を表示しない。
+            }
+
+            return "0.0.0";
+        }
+
+        private static string ExtractJsonString(string json, string key)
+        {
+            if (string.IsNullOrEmpty(json) || string.IsNullOrEmpty(key))
+            {
+                return null;
+            }
+
+            var keyIndex = json.IndexOf("\"" + key + "\"", StringComparison.Ordinal);
+            if (keyIndex < 0)
+            {
+                return null;
+            }
+
+            var valueStart = json.IndexOf('"', keyIndex + key.Length + 2);
+            if (valueStart < 0)
+            {
+                return null;
+            }
+
+            var valueEnd = json.IndexOf('"', valueStart + 1);
+            return valueEnd < 0 ? null : json.Substring(valueStart + 1, valueEnd - valueStart - 1);
+        }
+
+        private static bool IsNewerVersion(string latest, string current)
+        {
+            try
+            {
+                return new Version(latest).CompareTo(new Version(current)) > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void ShowUpdateBanner(string latestVersion)
+        {
+            if (_updateBanner != null)
+            {
+                return;
+            }
+
+            var banner = new VisualElement { name = "update-banner" };
+            banner.style.flexDirection = FlexDirection.Row;
+            banner.style.alignItems = Align.Center;
+            banner.style.backgroundColor = VRCQuickImporterTheme.ChipBgAccent;
+            VRCQuickImporterTheme.SetBorderRadius(banner, VRCQuickImporterTheme.RadiusCardOuter);
+            VRCQuickImporterTheme.SetBorder(banner, VRCQuickImporterTheme.Accent);
+            banner.style.paddingTop = VRCQuickImporterTheme.SpaceSm;
+            banner.style.paddingBottom = VRCQuickImporterTheme.SpaceSm;
+            banner.style.paddingLeft = VRCQuickImporterTheme.SpaceMd;
+            banner.style.paddingRight = VRCQuickImporterTheme.SpaceMd;
+            banner.style.marginTop = VRCQuickImporterTheme.SpaceMd;
+
+            var icon = new Label("↻");
+            icon.style.fontSize = 18;
+            icon.style.color = VRCQuickImporterTheme.Accent;
+            icon.style.marginRight = VRCQuickImporterTheme.SpaceMd;
+            banner.Add(icon);
+
+            var message = new Label($"最新版 v{latestVersion} がリリースされています！");
+            BoothFontProvider.Apply(message, FontStyle.Bold);
+            message.style.flexGrow = 1;
+            message.style.alignSelf = Align.Center;
+            banner.Add(message);
+
+            var linkButton = new Button(() => Application.OpenURL(BoothProductPageUrl))
+            {
+                text = "BOOTHで見る"
+            };
+            linkButton.style.marginLeft = VRCQuickImporterTheme.SpaceMd;
+            linkButton.tooltip = "BOOTH商品ページをブラウザで開きます";
+            banner.Add(linkButton);
+
+            var container = rootVisualElement.Q<ScrollView>()?.contentContainer;
+            if (container == null)
+            {
+                return;
+            }
+
+            _updateBanner = banner;
+            if (container.childCount >= 2)
+            {
+                container.Insert(1, _updateBanner);
+            }
+            else
+            {
+                container.Add(_updateBanner);
+            }
         }
 
         private static void StylePrimarySyncButton(Button button)
