@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+### Added
+- 起動時バージョンチェック: GitHub Releasesの最新版と比較し、更新があれば画面上部に通知バナーを表示
+- バナークリックでBOOTH商品ページをブラウザで開く
+
+### Fixed
+- ダウンロード完了後にhelperプロセスが終了しないレアバグを修正（Unity側10秒安全弁 + Helper側SafeClose）
+
 ## 0.2.2
 
 ### Changed
