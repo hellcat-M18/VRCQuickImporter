@@ -202,19 +202,29 @@ namespace VRCQuickImporter.Editor.Library
 
         private static List<BoothProduct> MergeProducts(IEnumerable<BoothProduct> incoming, IEnumerable<BoothProduct> existing)
         {
-            // 増分同期で新商品が先頭に追加されても既存商品を欠落させないよう、
-            // 再取得分を先頭に保ちつつProductId単位で重複を除外する。
+            // 同一商品IDでもダウンロードファイルが異なるバリエーションは別スロットとして保持する。
             var result = CopyProducts(incoming);
-            var seenIds = new HashSet<string>(result.Select(product => product.ProductId));
+            var seenSlots = new HashSet<string>(result.Select(MakeSlotKey));
             foreach (var product in CopyProducts(existing))
             {
-                if (seenIds.Add(product.ProductId))
+                if (seenSlots.Add(MakeSlotKey(product)))
                 {
                     result.Add(product);
                 }
             }
 
             return result;
+        }
+
+        private static string MakeSlotKey(BoothProduct product)
+        {
+            var fileIds = (product.Files ?? Enumerable.Empty<BoothDownloadFile>())
+                .Where(file => file != null)
+                .Select(file => file.FileId ?? string.Empty)
+                .Where(id => !string.IsNullOrEmpty(id))
+                .OrderBy(id => id)
+                .ToArray();
+            return product.ProductId + "::" + string.Join(",", fileIds);
         }
 
         private static List<BoothProduct> CopyProducts(IEnumerable<BoothProduct> products)
