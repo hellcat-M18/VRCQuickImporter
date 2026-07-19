@@ -54,7 +54,7 @@ namespace VRCQuickImporter.Editor.Library
         public string SizeText = string.Empty;
         public BoothDownloadFileKind Kind = BoothDownloadFileKind.Unknown;
 
-        /// <summary>将来の実DL用。現時点では未使用。</summary>
+        /// <summary>BOOTHからのダウンロードURL。</summary>
         public string DownloadUrl = string.Empty;
 
         public string DisplayName => string.IsNullOrEmpty(SizeText)
@@ -72,7 +72,7 @@ namespace VRCQuickImporter.Editor.Library
         public string Name = string.Empty;
         public string ShopName = string.Empty;
 
-        /// <summary>将来のサムネイル表示用。現時点ではURL保持のみで、Unity側ではネットワーク取得しない。</summary>
+        /// <summary>BOOTHサムネイル画像URL。</summary>
         public string ThumbnailUrl = string.Empty;
 
         public string ProductUrl = string.Empty;

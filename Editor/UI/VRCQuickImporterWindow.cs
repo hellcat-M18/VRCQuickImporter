@@ -58,6 +58,8 @@ namespace VRCQuickImporter.Editor.UI
         private DateTime _productVerificationPageStartedAtUtc;
         private bool _productVerificationInProgress;
         private VisualElement _updateBanner;
+        private static bool _updateCheckDone;
+        private static string _availableUpdateVersion;
 
         internal event System.Action<BoothProduct, BoothDownloadFile> OnImportRequested;
 
@@ -93,6 +95,7 @@ namespace VRCQuickImporter.Editor.UI
 
         private void CreateGUI()
         {
+            _updateBanner = null;
             VRCQuickImporterPaths.EnsureDirectories();
 
             OnImportRequested = OnImportButtonClicked;
@@ -136,6 +139,18 @@ namespace VRCQuickImporter.Editor.UI
 
         private async void CheckForUpdateAsync()
         {
+            if (!string.IsNullOrEmpty(_availableUpdateVersion))
+            {
+                ShowUpdateBanner(_availableUpdateVersion);
+            }
+
+            if (_updateCheckDone)
+            {
+                return;
+            }
+
+            // 同じUnityセッション内では、成功・失敗を問わず一度だけ確認する。
+            _updateCheckDone = true;
             try
             {
                 using var client = new HttpClient();
@@ -150,6 +165,7 @@ namespace VRCQuickImporter.Editor.UI
                 var latestVersion = tagName.Substring(1);
                 if (IsNewerVersion(latestVersion, GetCurrentVersion()))
                 {
+                    _availableUpdateVersion = latestVersion;
                     ShowUpdateBanner(latestVersion);
                 }
             }
@@ -175,7 +191,7 @@ namespace VRCQuickImporter.Editor.UI
                 // VERSIONを読めない場合は更新通知を表示しない。
             }
 
-            return "0.0.0";
+            return null;
         }
 
         private static string ExtractJsonString(string json, string key)
@@ -203,6 +219,11 @@ namespace VRCQuickImporter.Editor.UI
 
         private static bool IsNewerVersion(string latest, string current)
         {
+            if (string.IsNullOrWhiteSpace(latest) || string.IsNullOrWhiteSpace(current))
+            {
+                return false;
+            }
+
             try
             {
                 return new Version(latest).CompareTo(new Version(current)) > 0;
@@ -1063,7 +1084,7 @@ namespace VRCQuickImporter.Editor.UI
             section.Add(closeButton);
 
             var help = new HelpBox(
-                "WebView2 helperはBOOTHログインと同期処理にのみ使います。BOOTHのライブラリ画面をUnity内にそのまま表示する方針ではありません。" +
+                "WebView2 helperはBOOTHへのログイン・同期・ダウンロードに使います。BOOTHのライブラリ画面をUnity内にそのまま表示する方針ではありません。" +
                 "ログイン情報はプロジェクト内の専用プロファイルに保存されます。",
                 HelpBoxMessageType.Info);
             help.style.marginTop = 6;
@@ -1872,13 +1893,12 @@ namespace VRCQuickImporter.Editor.UI
             var updatedFile = FindUpdatedDownloadFile(_fileBeingVerified, updatedProduct.Files);
             // 表示用カードは複数バリエーションのFilesを統合しているため、
             // 確認対象のファイルが取得ページに残っているかだけを判定する。
-            var filesChanged = updatedFile == null;
             var metadataChanged = HasMetadataChanged(_productBeingVerified, updatedProduct);
 
             BoothLibraryStore.UpsertProductInPlace(updatedProduct, _fileBeingVerified);
             FinishProductVerification();
 
-            if (filesChanged || updatedFile == null)
+            if (updatedFile == null)
             {
                 RefreshWindow();
                 EditorUtility.DisplayDialog(
@@ -1976,7 +1996,7 @@ namespace VRCQuickImporter.Editor.UI
         {
             EditorUtility.DisplayDialog(
                 "VRCQuickImporter",
-                "商品を確認できませんでした。\n\nページ上部の「BOOTHと同期」ボタンで再試行してください。\nそれでも解決しない場合は、詳細設定＞全件再取得をお試しください。",
+                "商品を確認できませんでした。\n\nページ上部の「BOOTHと同期」ボタンで再試行してください。\nそれでも解決しない場合は、詳細設定＞完全リフレッシュをお試しください。",
                 "OK");
         }
 

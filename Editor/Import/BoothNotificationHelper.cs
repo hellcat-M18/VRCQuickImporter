@@ -13,11 +13,15 @@ namespace VRCQuickImporter.Editor.Import
         private static extern bool Shell_NotifyIcon(uint dwMessage, ref NOTIFYICONDATA lpdata);
 
         private const uint NIM_ADD = 0;
+        private const uint NIM_MODIFY = 1;
         private const uint NIM_DELETE = 2;
         private const uint NIF_ICON = 0x2;
         private const uint NIF_INFO = 0x10;
         private const uint NIIF_INFO = 1;
         private static readonly IntPtr IDI_INFORMATION = new IntPtr(32516);
+        private static readonly object NotificationLock = new object();
+        private static bool _iconAdded;
+        private static int _notificationGeneration;
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
         private struct NOTIFYICONDATA
@@ -42,6 +46,7 @@ namespace VRCQuickImporter.Editor.Import
 
         public static void ShowNotification(string title, string message)
         {
+#if UNITY_EDITOR_WIN
             var process = Process.GetCurrentProcess();
             var hwnd = process.MainWindowHandle;
 
@@ -58,21 +63,50 @@ namespace VRCQuickImporter.Editor.Import
                 dwInfoFlags = NIIF_INFO
             };
 
-            // アイコン追加 + バルーン表示
-            Shell_NotifyIcon(NIM_ADD, ref nid);
+            int notificationGeneration;
+            lock (NotificationLock)
+            {
+                var command = _iconAdded ? NIM_MODIFY : NIM_ADD;
+                var shown = Shell_NotifyIcon(command, ref nid);
+                if (!shown && command == NIM_MODIFY)
+                {
+                    // Explorer再起動などで既存アイコンが失われた場合は追加し直す。
+                    shown = Shell_NotifyIcon(NIM_ADD, ref nid);
+                }
 
-            // バルーンが閉じるまで少し待ってから削除
-            // Shell_NotifyIconは非同期なので、アイコンは残るがバルーンは消える
-            // 簡易的にタイマーで削除（別スレッドで待機）
+                if (!shown)
+                {
+                    return;
+                }
+
+                _iconAdded = true;
+                notificationGeneration = ++_notificationGeneration;
+            }
+
+            // 最終通知から一定時間後にアイコンを削除する。
+            // 新しい通知が来た場合は世代番号が変わるため、古い削除タイマーは何もしない。
             System.Threading.ThreadPool.QueueUserWorkItem(_ =>
             {
                 System.Threading.Thread.Sleep(6000); // バルーン表示時間 + 余裕
-                try
+                lock (NotificationLock)
                 {
-                    Shell_NotifyIcon(NIM_DELETE, ref nid);
+                    if (!_iconAdded || notificationGeneration != _notificationGeneration)
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        Shell_NotifyIcon(NIM_DELETE, ref nid);
+                    }
+                    catch { }
+                    finally
+                    {
+                        _iconAdded = false;
+                    }
                 }
-                catch { }
             });
+#endif
         }
 
     }

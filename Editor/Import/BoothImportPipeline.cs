@@ -63,6 +63,19 @@ namespace VRCQuickImporter.Editor.Import
                 return;
             }
 
+            var progressPath = Path.Combine(VRCQuickImporterPaths.LogsDirectory, "download-progress.json");
+            try
+            {
+                if (File.Exists(progressPath))
+                {
+                    File.Delete(progressPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] 前回のダウンロード進捗ファイルの削除に失敗しました: " + ex.Message);
+            }
+
             _downloadFileFirstSeenAt = null;
             var process = WebView2HostLauncher.StartDownload(file.DownloadUrl, downloadPath, headless: true);
             if (process == null)
@@ -70,12 +83,11 @@ namespace VRCQuickImporter.Editor.Import
                 return;
             }
 
+            var startedAt = DateTime.UtcNow;
+            _activeDownloadStartedAt = startedAt;
             Debug.Log($"[VRCQuickImporter] ダウンロード開始: {file.DownloadUrl} → {downloadPath}");
 
             // プロセス完了をポーリング（進捗表示付き）
-            var startedAt = DateTime.UtcNow;
-            _activeDownloadStartedAt = startedAt;
-            var progressPath = Path.Combine(VRCQuickImporterPaths.LogsDirectory, "download-progress.json");
             var lastProgressText = string.Empty;
             EditorApplication.update -= PollDownload;
             EditorApplication.update += PollDownload;
@@ -100,29 +112,21 @@ namespace VRCQuickImporter.Editor.Import
                             return;
                         }
 
-                        // ダウンロードファイルが存在するのにプロセスが終了しない場合の安全弁
-                        if (File.Exists(downloadPath))
-                        {
-                            _downloadFileFirstSeenAt ??= DateTime.UtcNow;
-                            if ((DateTime.UtcNow - _downloadFileFirstSeenAt.Value).TotalSeconds > 10)
-                            {
-                                try { process.Kill(); } catch { }
-                                _downloadFileFirstSeenAt = null;
-                                return; // 次のフレームでHasExitedがtrueになり、通常処理に進む
-                            }
-                        }
-
-                        // 進捗ファイルを読んで表示
+                        // 進捗ファイルを読んで表示する。前回実行分の完了状態を誤用しないよう、
+                        // 今回のダウンロード開始後に更新されたファイルだけを対象にする。
                         var progressText = "ダウンロード中...";
                         var pct = -1f;
+                        var downloadCompleted = false;
                         try
                         {
-                            if (File.Exists(progressPath))
+                            if (File.Exists(progressPath) &&
+                                File.GetLastWriteTimeUtc(progressPath) >= startedAt.AddSeconds(-1))
                             {
                                 var json = File.ReadAllText(progressPath);
                                 var doc = JsonUtility.FromJson<DownloadProgressInfo>(json);
                                 if (doc != null && !string.IsNullOrEmpty(doc.status))
                                 {
+                                    downloadCompleted = string.Equals(doc.status, "completed", StringComparison.Ordinal);
                                     if (doc.status == "started")
                                     {
                                         progressText = "ダウンロード準備中...";
@@ -144,6 +148,23 @@ namespace VRCQuickImporter.Editor.Import
                             }
                         }
                         catch { }
+
+                        // ダウンロード完了をhelperが記録済みなのにプロセスが終了しない場合だけ、
+                        // 10秒待って終了する。出力ファイルが作成された直後の通常ダウンロードは対象にしない。
+                        if (downloadCompleted && File.Exists(downloadPath))
+                        {
+                            _downloadFileFirstSeenAt ??= DateTime.UtcNow;
+                            if ((DateTime.UtcNow - _downloadFileFirstSeenAt.Value).TotalSeconds > 10)
+                            {
+                                try { process.Kill(); } catch { }
+                                _downloadFileFirstSeenAt = null;
+                                return; // 次のフレームでHasExitedがtrueになり、通常処理に進む
+                            }
+                        }
+                        else
+                        {
+                            _downloadFileFirstSeenAt = null;
+                        }
 
                         if (progressText != lastProgressText || pct >= 0)
                         {
@@ -272,11 +293,25 @@ namespace VRCQuickImporter.Editor.Import
             Debug.Log("[VRCQuickImporter] unitypackage をインポート: " + path);
 
             EnsureImportPackageHandlersRegistered();
-            if (!string.IsNullOrEmpty(productId))
+            var importTrackingStarted = !string.IsNullOrEmpty(productId);
+            if (importTrackingStarted)
             {
                 BeginPackageImport(productId);
             }
-            AssetDatabase.ImportPackage(path, interactive: true);
+
+            try
+            {
+                AssetDatabase.ImportPackage(path, interactive: true);
+            }
+            catch
+            {
+                if (importTrackingStarted)
+                {
+                    CompletePackageImport();
+                }
+
+                throw;
+            }
         }
 
         private static void EnsureImportPackageHandlersRegistered()
@@ -537,26 +572,38 @@ namespace VRCQuickImporter.Editor.Import
             using (var stream = File.OpenRead(zipPath))
             using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
             {
+                var fullDestDir = Path.GetFullPath(destDir);
+                if (!fullDestDir.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal))
+                {
+                    fullDestDir += Path.DirectorySeparatorChar;
+                }
+
                 foreach (var entry in archive.Entries)
                 {
                     var relativePath = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
                     var destPath = Path.Combine(destDir, relativePath);
+                    var fullDestPath = Path.GetFullPath(destPath);
+                    if (!fullDestPath.StartsWith(fullDestDir, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Debug.LogWarning("[VRCQuickImporter] 展開先外を指すZIPエントリをスキップしました: " + entry.FullName);
+                        continue;
+                    }
 
                     // ディレクトリエントリ
                     if (entry.FullName.EndsWith("/") || entry.FullName.EndsWith("\\"))
                     {
-                        Directory.CreateDirectory(destPath);
+                        Directory.CreateDirectory(fullDestPath);
                         continue;
                     }
 
-                    var dir = Path.GetDirectoryName(destPath);
+                    var dir = Path.GetDirectoryName(fullDestPath);
                     if (!string.IsNullOrEmpty(dir))
                     {
                         Directory.CreateDirectory(dir);
                     }
 
                     using (var entryStream = entry.Open())
-                    using (var fileStream = File.Create(destPath))
+                    using (var fileStream = File.Create(fullDestPath))
                     {
                         entryStream.CopyTo(fileStream);
                     }

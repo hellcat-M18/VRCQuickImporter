@@ -6,12 +6,13 @@ This tool includes files from the NuGet package `Microsoft.Web.WebView2`:
 
 - `Microsoft.Web.WebView2.Core.dll`
 - `Microsoft.Web.WebView2.WinForms.dll`
+- `Microsoft.Web.WebView2.Wpf.dll`
 - `WebView2Loader.dll`
 
 Package: https://www.nuget.org/packages/Microsoft.Web.WebView2
 Documentation: https://learn.microsoft.com/en-us/microsoft-edge/webview2/
 
-The WebView2 Evergreen Runtime itself is not bundled. Users must have the runtime installed on Windows.
+The WebView2 Evergreen Runtime itself is not bundled. When it is not installed, the tool asks for consent before downloading and running Microsoft's official bootstrapper; users can also install it manually.
 
 ## Noto Sans JP (Noto CJK)
 

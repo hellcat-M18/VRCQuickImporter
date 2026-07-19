@@ -82,7 +82,7 @@ namespace VRCQuickImporter.Editor.UI
             thumbnail.style.height = size;
         }
 
-        /// <summary>カード上にインポート先選択オーバーレイを表示する。</summary>
+        /// <summary>カード上に対象アセット選択オーバーレイを表示する。</summary>
         public static void ShowImportPathOverlay(VisualElement cardRoot, List<string> validPaths, Action<string> onPathSelected)
         {
             if (cardRoot == null || validPaths == null || validPaths.Count == 0)
@@ -186,7 +186,7 @@ namespace VRCQuickImporter.Editor.UI
             overlay.schedule.Execute(() => overlay.Focus());
         }
 
-        /// <summary>表示中のインポート先選択オーバーレイを閉じる。</summary>
+        /// <summary>表示中の対象アセット選択オーバーレイを閉じる。</summary>
         public static void HideImportPathOverlay(VisualElement cardRoot)
         {
             if (cardRoot == null)
@@ -278,7 +278,7 @@ namespace VRCQuickImporter.Editor.UI
                 placeholder.style.display = DisplayStyle.None;
             });
 
-            // オーバーレイバッジ（BOOTHスキリスト風）。サムネ右上/左上に配置。
+            // オーバーレイバッジ（BOOTHリスト風）。サムネ右上/左上に配置。
             var badgeRow = new VisualElement();
             badgeRow.style.position = Position.Absolute;
             badgeRow.style.left = VRCQuickImporterTheme.SpaceXs;
@@ -484,7 +484,6 @@ namespace VRCQuickImporter.Editor.UI
             }
 
             var popup = new PopupField<string>(choices, 0);
-            popup.tooltip = files.Count > 0 ? BoothTextUtil.SanitizeDisplayText(files[0].DisplayName) : string.Empty;
             popup.style.marginBottom = VRCQuickImporterTheme.SpaceMd;
             row.Add(popup);
 
@@ -493,11 +492,22 @@ namespace VRCQuickImporter.Editor.UI
                 text = "ダウンロード＆インポート"
             };
             StylePrimaryButton(importButton);
-            var hasUrl = files.Count > 0 && !string.IsNullOrEmpty(files[0].DownloadUrl);
-            importButton.SetEnabled(hasUrl);
-            importButton.tooltip = hasUrl
-                ? "選択したファイルをダウンロードしてUnityへインポートします"
-                : "このファイルのダウンロードURLが未取得です。再度ライブラリを同期してください。";
+
+            Action updateImportButtonState = () =>
+            {
+                var selectedFile = popup.index >= 0 && popup.index < files.Count ? files[popup.index] : null;
+                var hasUrl = !string.IsNullOrEmpty(selectedFile?.DownloadUrl);
+                popup.tooltip = selectedFile == null
+                    ? string.Empty
+                    : BoothTextUtil.SanitizeDisplayText(selectedFile.DisplayName);
+                importButton.SetEnabled(hasUrl);
+                importButton.tooltip = hasUrl
+                    ? "選択したファイルをダウンロードしてUnityへインポートします"
+                    : "このファイルのダウンロードURLが未取得です。再度ライブラリを同期してください。";
+            };
+            popup.RegisterValueChangedCallback(_ => updateImportButtonState());
+            updateImportButtonState();
+
             importButton.style.width = new Length(100, LengthUnit.Percent);
             row.Add(importButton);
 

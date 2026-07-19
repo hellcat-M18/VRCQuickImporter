@@ -202,14 +202,18 @@ namespace VRCQuickImporter.Editor.Library
 
         private static List<BoothProduct> MergeProducts(IEnumerable<BoothProduct> incoming, IEnumerable<BoothProduct> existing)
         {
-            var incomingProducts = CopyProducts(incoming);
-            var existingProducts = CopyProducts(existing);
+            // 増分同期で新商品が先頭に追加されても既存商品を欠落させないよう、
+            // 再取得分を先頭に保ちつつProductId単位で重複を除外する。
+            var result = CopyProducts(incoming);
+            var seenIds = new HashSet<string>(result.Select(product => product.ProductId));
+            foreach (var product in CopyProducts(existing))
+            {
+                if (seenIds.Add(product.ProductId))
+                {
+                    result.Add(product);
+                }
+            }
 
-            // 増分同期では先頭ページ群を再取得する。ProductIdでは重複排除せず、
-            // 再取得したカードスロット数だけ古い先頭スロットを置き換えてページ順を保つ。
-            var result = new List<BoothProduct>(incomingProducts.Count + Math.Max(0, existingProducts.Count - incomingProducts.Count));
-            result.AddRange(incomingProducts);
-            result.AddRange(existingProducts.Skip(incomingProducts.Count));
             return result;
         }
 
@@ -282,10 +286,12 @@ namespace VRCQuickImporter.Editor.Library
             {
                 if (File.Exists(databasePath))
                 {
-                    File.Copy(databasePath, backupPath, overwrite: true);
+                    File.Replace(tmpPath, databasePath, backupPath, ignoreMetadataErrors: true);
                 }
-
-                File.Copy(tmpPath, databasePath, overwrite: true);
+                else
+                {
+                    File.Move(tmpPath, databasePath);
+                }
             }
             catch
             {
@@ -315,7 +321,18 @@ namespace VRCQuickImporter.Editor.Library
 
         private static void NormalizeDocument(BoothLibraryDocument document)
         {
-            foreach (var product in document.Products ?? (document.Products = new List<BoothProduct>()))
+            if (document == null)
+            {
+                return;
+            }
+
+            if (document.Products == null)
+            {
+                document.Products = new List<BoothProduct>();
+            }
+
+            document.Products.RemoveAll(product => product == null);
+            foreach (var product in document.Products)
             {
                 product.Name = Normalize(product.Name);
                 product.ShopName = Normalize(product.ShopName);
@@ -348,6 +365,7 @@ namespace VRCQuickImporter.Editor.Library
                     product.Files = new List<BoothDownloadFile>();
                 }
 
+                product.Files.RemoveAll(file => file == null);
                 foreach (var file in product.Files)
                 {
                     file.Name = Normalize(file.Name);

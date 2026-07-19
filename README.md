@@ -2,7 +2,7 @@
 
 BOOTHで購入したアセットをUnity Editor内から管理できるVRChat向けエディタ拡張ツールです。
 
-BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定後にリンクを更新予定）
+BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/8616786)
 
 > **本ツールはBOOTHの非公式ツールです。**
 > 公式の提供物ではなく、利用は自己責任です。
@@ -20,7 +20,7 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 
 ### BOOTHで購入（300円）
 
-[BOOTH](https://hellcat.booth.pm/items/xxxxx)で購入後、ダウンロードした`.unitypackage`をダブルクリックして導入してください。
+[BOOTH](https://hellcat.booth.pm/items/8616786)で購入後、ダウンロードした`.unitypackage`をダブルクリックして導入してください。
 
 ※GitHubでも無料公開しています。**製作者を応援したい方はBOOTHからどうぞ。**
 
@@ -32,9 +32,9 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 ### 初回セットアップ
 
 1. Unityメニュー `Tools > VRCQuickImporter` でウィンドウを開きます。
-2. 「BOOTHにログイン」を押し、WebView2で開いたBOOTH公式画面からログインします。
+2. 「詳細設定 / トラブルシュート」を開き、「BOOTHログイン画面を開く」からWebView2で開いたBOOTH公式画面へログインします。
    - 本ツールはBOOTHのパスワードを保存・送信しません。認証はBOOTH公式ページ上で行われます。
-3. 「BOOTHと同期」を押すと、初回の確認ダイアログが表示されます。同意するとライブラリ全ページの取得を開始します。
+3. 画面上部の「初回セットアップ」を押すと、確認ダイアログが表示されます。同意するとライブラリ全ページの取得を開始します。
 4. 同期完了後、カードグリッドに購入済み商品が表示されます。
 
 以降は原則としてBOOTHへの再ログインが不要になります。セッション情報はプロジェクト内の専用プロファイルに保存されます。
@@ -45,7 +45,7 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 
 ### 購入履歴をBoothと同期する
 
-「BOOTHと同期」を押すと、前回の同期以降の新しい商品データを追加取得します。新しいページが空になった時点で自動停止します。
+「BOOTHと同期」を押すと、前回の同期以降の新しい商品データを追加取得します。既存の商品と重複したか、新しいページが空になった時点で自動停止します。
 
 ### 商品を探す
 
@@ -62,7 +62,7 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 
 ### インポート
 
-ダウンロード完了後、インポートボタンを押してUnityに取り込みます。
+「ダウンロード＆インポート」を押すと、ダウンロード完了後にファイル形式に応じてUnityへの取り込みを開始します。
 
 - `.unitypackage`が1つだけ → 自動インポート
 - `.unitypackage`が複数 → どのファイルをインポートするか確認
@@ -95,15 +95,9 @@ BOOTH: [VRCQuickImporter](https://hellcat.booth.pm/items/xxxxx)（商品ID確定
 
 ### データ削除/リセット
 
-以下を個別に削除できます。
+詳細設定から個別に削除できるのはWebView2ログイン情報/プロファイルです。
 
-- WebView2ログイン情報/プロファイル
-- ライブラリキャッシュ（`database.json`）
-- サムネイルキャッシュ
-- ダウンロード済みファイル
-- 展開済みファイル
-- ログファイル
-
+ライブラリキャッシュ、サムネイル、ダウンロード済みファイル、展開済みファイル、ログは、データフォルダを開いて手動で削除できます。
 `Library/VRCQuickImporter/` 全体を削除しても再生成されますが、WebView2プロファイルも消えるため再ログインが必要になります。
 
 ### ログイン再認証
@@ -172,6 +166,7 @@ Library/VRCQuickImporter/
   webview-profile/            WebView2ログイン用プロファイル
   database.json               同期済みライブラリ
   database.json.bak           database.jsonのバックアップ
+  import-history.json         このツール経由でインポートしたアセットの履歴
   pending-page.json           取得途中の1ページ分（同期完了後に削除）
 ```
 

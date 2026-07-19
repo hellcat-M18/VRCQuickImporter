@@ -146,10 +146,12 @@ namespace VRCQuickImporter.Editor.Import
             {
                 if (File.Exists(historyPath))
                 {
-                    File.Copy(historyPath, backupPath, overwrite: true);
+                    File.Replace(tmpPath, historyPath, backupPath, ignoreMetadataErrors: true);
                 }
-
-                File.Copy(tmpPath, historyPath, overwrite: true);
+                else
+                {
+                    File.Move(tmpPath, historyPath);
+                }
             }
             catch
             {
