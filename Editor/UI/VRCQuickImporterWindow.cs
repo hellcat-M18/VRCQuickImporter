@@ -28,6 +28,10 @@ namespace VRCQuickImporter.Editor.UI
         private Process _librarySyncProcess;
         private DateTime _librarySyncStartedAtUtc;
         private bool _librarySyncInProgress;
+        private Process _authenticationProcess;
+        private DateTime _authenticationStartedAtUtc;
+        private bool _authenticationInProgress;
+        private bool _waitingForInteractiveAuthentication;
         private bool _fullRefreshInProgress;
         private int _fullRefreshCompletedPage;
         private int _fullRefreshProductCount;
@@ -61,9 +65,12 @@ namespace VRCQuickImporter.Editor.UI
         private static bool _updateCheckDone;
         private static string _availableUpdateVersion;
 
+        private bool IsLibraryBusy => _librarySyncInProgress || _authenticationInProgress;
+
         internal event System.Action<BoothProduct, BoothDownloadFile> OnImportRequested;
 
         private const float BackgroundSyncTimeoutSeconds = 120f;
+        private const float AuthenticationTimeoutSeconds = 120f;
         private const float ProductVerificationTimeoutSeconds = 120f;
         private const double BoothLibraryAccessIntervalSeconds = 5.0;
         private const int BoothLibraryPageSize = 10;
@@ -335,24 +342,28 @@ namespace VRCQuickImporter.Editor.UI
 
             var syncButton = new Button(StartLibrarySync)
             {
-                text = _librarySyncInProgress ? "同期中..." : (BoothLibraryStore.InitialFullSyncCompleted ? "BOOTHと同期" : "初回セットアップ"),
+                text = _authenticationInProgress
+                    ? (_waitingForInteractiveAuthentication ? "BOOTHログイン待ち..." : "認証確認中...")
+                    : (_librarySyncInProgress ? "同期中..." : (BoothLibraryStore.InitialFullSyncCompleted ? "BOOTHと同期" : "初回セットアップ")),
                 name = "sync-button"
             };
-            syncButton.SetEnabled(!_librarySyncInProgress);
+            syncButton.SetEnabled(!_librarySyncInProgress && !_authenticationInProgress);
             syncButton.tooltip = BoothLibraryStore.InitialFullSyncCompleted
                 ? "BOOTHライブラリを増分同期します。既存商品と重なるページまで取得します。"
                 : "BOOTHライブラリを最後まで取得し、ローカルJSONキャッシュを作成します。";
             StylePrimarySyncButton(syncButton);
             headerRow.Add(syncButton);
 
-            if (_librarySyncInProgress)
+            if (_librarySyncInProgress || _authenticationInProgress)
             {
-                var cancelButton = new Button(CancelLibrarySync)
+                var cancelButton = new Button(_authenticationInProgress ? CancelAuthentication : CancelLibrarySync)
                 {
                     text = "キャンセル",
                     name = "sync-cancel-button"
                 };
-                cancelButton.tooltip = "進行中の同期を中断します。取得途中のページはローカルJSONキャッシュへ反映しません。";
+                cancelButton.tooltip = _authenticationInProgress
+                    ? "BOOTHログイン確認を中断します。初回同期は開始しません。"
+                    : "進行中の同期を中断します。取得途中のページはローカルJSONキャッシュへ反映しません。";
                 cancelButton.style.marginLeft = VRCQuickImporterTheme.SpaceSm;
                 headerRow.Add(cancelButton);
             }
@@ -552,7 +563,7 @@ namespace VRCQuickImporter.Editor.UI
 
         private Color GetLibraryStateAccent(BoothLibraryDataState dataState)
         {
-            if (_librarySyncInProgress) return VRCQuickImporterTheme.Accent;
+            if (IsLibraryBusy) return VRCQuickImporterTheme.Accent;
             if (IsLibraryProblemState(dataState)) return VRCQuickImporterTheme.Price;
             if (_reachedLastPage) return VRCQuickImporterTheme.Like;
             return VRCQuickImporterTheme.Accent;
@@ -560,7 +571,7 @@ namespace VRCQuickImporter.Editor.UI
 
         private string GetSimpleLibraryStateTitle(BoothLibraryDataState dataState)
         {
-            if (_librarySyncInProgress) return "同期中";
+            if (IsLibraryBusy) return _authenticationInProgress ? "認証中" : "同期中";
             if (dataState == BoothLibraryDataState.MissingDatabase) return "未同期";
             if (dataState == BoothLibraryDataState.Error) return "エラー";
             return "同期済み";
@@ -575,7 +586,7 @@ namespace VRCQuickImporter.Editor.UI
 
         private string GetGridStateBadge(BoothLibraryDataState dataState)
         {
-            if (_librarySyncInProgress) return "取得中";
+            if (IsLibraryBusy) return _authenticationInProgress ? "認証中" : "取得中";
             if (dataState == BoothLibraryDataState.Error) return "エラー";
             if (dataState == BoothLibraryDataState.Empty) return "0件";
             return "未同期";
@@ -583,7 +594,7 @@ namespace VRCQuickImporter.Editor.UI
 
         private string GetGridStateTitle(BoothLibraryDataState dataState)
         {
-            if (_librarySyncInProgress) return "ライブラリを読み込んでいます";
+            if (IsLibraryBusy) return _authenticationInProgress ? "BOOTHのログイン状態を確認しています" : "ライブラリを読み込んでいます";
             if (dataState == BoothLibraryDataState.Error) return "商品一覧を表示できません";
             if (dataState == BoothLibraryDataState.Empty) return "表示できる商品がありません";
             return "BOOTHライブラリを同期してください";
@@ -591,7 +602,11 @@ namespace VRCQuickImporter.Editor.UI
 
         private string GetGridStateBody(BoothLibraryDataState dataState)
         {
-            if (_librarySyncInProgress) return "WebView2 helperがBOOTHの購入履歴ページを取得しています。完了するとここにカードが表示されます。";
+            if (IsLibraryBusy) return _authenticationInProgress
+                ? (_waitingForInteractiveAuthentication
+                    ? "BOOTHログイン画面でログインしてください。完了すると初回同期を開始します。"
+                    : "BOOTHの認証状態を確認しています。")
+                : "WebView2 helperがBOOTHの購入履歴ページを取得しています。完了するとここにカードが表示されます。";
             if (dataState == BoothLibraryDataState.Error) return "database.json の読み込みに失敗しました。詳細設定からデータフォルダを開き、必要に応じて再同期してください。";
             if (dataState == BoothLibraryDataState.Empty) return "BOOTH側で購入履歴が見つからない、またはログイン状態が切れている可能性があります。同期ウインドウを表示して再実行すると確認しやすいです。";
             return "右上の「初回セットアップ」から最後のページまで取得し、ローカルJSONキャッシュを作成します。BOOTHアクセスは明示操作ごとに行われます。";
@@ -600,7 +615,7 @@ namespace VRCQuickImporter.Editor.UI
         private string BuildSimpleLibraryStatusText(int productCount, BoothLibraryDataState dataState)
         {
             var lastSyncedAt = GetLastSyncedAtText();
-            if (_librarySyncInProgress)
+            if (IsLibraryBusy)
             {
                 return "表示中: " + productCount + "件\n最終同期: " + lastSyncedAt;
             }
@@ -1060,7 +1075,7 @@ namespace VRCQuickImporter.Editor.UI
                 text = "完全リフレッシュ（全件取り直し）",
                 name = "full-refresh-button"
             };
-            fullRefreshButton.SetEnabled(!_librarySyncInProgress && BoothLibraryStore.HasDatabase);
+            fullRefreshButton.SetEnabled(!_librarySyncInProgress && !_authenticationInProgress && BoothLibraryStore.HasDatabase);
             fullRefreshButton.tooltip = "BOOTHライブラリを最後まで再取得し、ローカルJSONキャッシュを丸ごと置き換えます。";
             section.Add(fullRefreshButton);
 
@@ -1161,7 +1176,7 @@ namespace VRCQuickImporter.Editor.UI
                     return;
                 }
 
-                BeginLibrarySync(LibrarySyncMode.InitialSetup);
+                BeginInitialSetupAuthentication();
                 return;
             }
 
@@ -1228,6 +1243,228 @@ namespace VRCQuickImporter.Editor.UI
                 "・以後の同期は基本的に増分確認になります。\n\n続行しますか？",
                 "初回セットアップを開始",
                 "キャンセル");
+        }
+
+        [Serializable]
+        private sealed class AuthenticationResult
+        {
+            public string Status = string.Empty;
+            public string FinalUrl = string.Empty;
+            public string Message = string.Empty;
+            public string UpdatedAt = string.Empty;
+        }
+
+        private void BeginInitialSetupAuthentication()
+        {
+            if (_authenticationInProgress || _librarySyncInProgress)
+            {
+                return;
+            }
+
+            VRCQuickImporterPaths.EnsureDirectories();
+            DeleteAuthenticationResult();
+            _authenticationInProgress = true;
+            _waitingForInteractiveAuthentication = false;
+            _authenticationStartedAtUtc = DateTime.UtcNow;
+            _authenticationProcess = WebView2HostLauncher.StartAuthenticationCheck(VRCQuickImporterPaths.AuthenticationResultPath);
+            if (_authenticationProcess == null)
+            {
+                FinishAuthenticationFailure("BOOTHの認証確認helperを起動できませんでした。初回セットアップは開始していません。", showDialog: true);
+                return;
+            }
+
+            EditorApplication.update -= PollAuthentication;
+            EditorApplication.update += PollAuthentication;
+            RefreshWindow();
+        }
+
+        private void PollAuthentication()
+        {
+            if (!_authenticationInProgress)
+            {
+                EditorApplication.update -= PollAuthentication;
+                return;
+            }
+
+            var elapsed = (float)(DateTime.UtcNow - _authenticationStartedAtUtc).TotalSeconds;
+            if (_authenticationProcess == null)
+            {
+                FinishAuthenticationFailure("BOOTHの認証確認状態を取得できませんでした。初回セットアップは開始していません。", showDialog: true);
+                return;
+            }
+
+            try
+            {
+                if (_authenticationProcess.HasExited)
+                {
+                    var result = LoadAuthenticationResult();
+                    if (result == null)
+                    {
+                        FinishAuthenticationFailure(
+                            _waitingForInteractiveAuthentication
+                                ? "BOOTHログインの結果を確認できませんでした。初回同期は開始していません。"
+                                : "BOOTHの認証状態を確認できませんでした。初回同期は開始していません。",
+                            showDialog: true);
+                        return;
+                    }
+
+                    if (string.Equals(result.Status, "authenticated", StringComparison.OrdinalIgnoreCase))
+                    {
+                        FinishAuthenticationSuccess();
+                        return;
+                    }
+
+                    if (!_waitingForInteractiveAuthentication &&
+                        string.Equals(result.Status, "auth_required", StringComparison.OrdinalIgnoreCase))
+                    {
+                        StartInteractiveAuthentication();
+                        return;
+                    }
+
+                    var message = string.IsNullOrWhiteSpace(result.Message)
+                        ? "BOOTHのログインを確認できなかったため、初回同期は開始していません。"
+                        : result.Message + "\n初回同期は開始していません。";
+                    FinishAuthenticationFailure(message, showDialog: true);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] 認証helper監視に失敗しました: " + ex.Message);
+                FinishAuthenticationFailure("BOOTHの認証helperを監視できませんでした。初回同期は開始していません。", showDialog: true);
+                return;
+            }
+
+            if (elapsed > AuthenticationTimeoutSeconds)
+            {
+                try
+                {
+                    if (!_authenticationProcess.HasExited)
+                    {
+                        _authenticationProcess.Kill();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning("[VRCQuickImporter] 認証helperのタイムアウト終了に失敗しました: " + ex.Message);
+                }
+
+                FinishAuthenticationFailure(
+                    _waitingForInteractiveAuthentication
+                        ? "BOOTHログインがタイムアウトしました。ログイン完了を確認できなかったため、初回同期は開始していません。"
+                        : "BOOTHの認証確認がタイムアウトしました。初回同期は開始していません。",
+                    showDialog: true);
+            }
+        }
+
+        private void StartInteractiveAuthentication()
+        {
+            DisposeAuthenticationProcess();
+            DeleteAuthenticationResult();
+            _waitingForInteractiveAuthentication = true;
+            _authenticationStartedAtUtc = DateTime.UtcNow;
+            _authenticationProcess = WebView2HostLauncher.StartInteractiveAuthentication(VRCQuickImporterPaths.AuthenticationResultPath);
+            if (_authenticationProcess == null)
+            {
+                FinishAuthenticationFailure("BOOTHログイン画面を起動できませんでした。初回同期は開始していません。", showDialog: true);
+                return;
+            }
+
+            RefreshWindow();
+        }
+
+        private void FinishAuthenticationSuccess()
+        {
+            EditorApplication.update -= PollAuthentication;
+            DisposeAuthenticationProcess();
+            DeleteAuthenticationResult();
+            _authenticationInProgress = false;
+            _waitingForInteractiveAuthentication = false;
+            BeginLibrarySync(LibrarySyncMode.InitialSetup);
+        }
+
+        private void FinishAuthenticationFailure(string message, bool showDialog)
+        {
+            EditorApplication.update -= PollAuthentication;
+            DisposeAuthenticationProcess();
+            DeleteAuthenticationResult();
+            _authenticationInProgress = false;
+            _waitingForInteractiveAuthentication = false;
+            Debug.LogWarning("[VRCQuickImporter] " + message.Replace("\n", " "));
+            if (showDialog)
+            {
+                EditorUtility.DisplayDialog("VRCQuickImporter", message, "OK");
+            }
+            RefreshWindow();
+        }
+
+        private void CancelAuthentication()
+        {
+            if (!_authenticationInProgress)
+            {
+                return;
+            }
+
+            FinishAuthenticationFailure("BOOTH認証をキャンセルしました。初回同期は開始していません。", showDialog: true);
+        }
+
+        private AuthenticationResult LoadAuthenticationResult()
+        {
+            try
+            {
+                if (!File.Exists(VRCQuickImporterPaths.AuthenticationResultPath))
+                {
+                    return null;
+                }
+
+                var result = JsonUtility.FromJson<AuthenticationResult>(File.ReadAllText(VRCQuickImporterPaths.AuthenticationResultPath));
+                return result != null && !string.IsNullOrWhiteSpace(result.Status) ? result : null;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] 認証結果の読み込みに失敗しました: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static void DeleteAuthenticationResult()
+        {
+            try
+            {
+                File.Delete(VRCQuickImporterPaths.AuthenticationResultPath);
+                File.Delete(VRCQuickImporterPaths.AuthenticationResultPath + ".tmp");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] 古い認証結果の削除に失敗しました: " + ex.Message);
+            }
+        }
+
+        private void DisposeAuthenticationProcess()
+        {
+            if (_authenticationProcess == null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!_authenticationProcess.HasExited)
+                {
+                    _authenticationProcess.Kill();
+                    _authenticationProcess.WaitForExit(2000);
+                }
+
+                _authenticationProcess.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[VRCQuickImporter] 認証helperの破棄に失敗しました: " + ex.Message);
+            }
+            finally
+            {
+                _authenticationProcess = null;
+            }
         }
 
         private void BeginLibrarySync(LibrarySyncMode mode)
@@ -2083,6 +2320,10 @@ namespace VRCQuickImporter.Editor.UI
         {
             HideImportPathOverlays();
             AbortProductVerification();
+            EditorApplication.update -= PollAuthentication;
+            _authenticationInProgress = false;
+            _waitingForInteractiveAuthentication = false;
+            DisposeAuthenticationProcess();
 
             try
             {

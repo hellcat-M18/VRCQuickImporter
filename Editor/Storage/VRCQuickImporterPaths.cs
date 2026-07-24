@@ -21,6 +21,7 @@ namespace VRCQuickImporter.Editor.Storage
         public static string ImportHistoryPath => Path.Combine(DataRoot, "import-history.json");
         public static string PendingPagePath => Path.Combine(DataRoot, "pending-page.json");
         public static string BoothLibraryAccessStampPath => Path.Combine(CacheDirectory, "booth-library-last-access.txt");
+        public static string AuthenticationResultPath => Path.Combine(CacheDirectory, "auth-result.json");
 
         public static void EnsureDirectories()
         {

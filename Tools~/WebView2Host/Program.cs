@@ -25,6 +25,10 @@ internal static class Program
         Directory.CreateDirectory(options.ProfileDirectory);
         Directory.CreateDirectory(options.LogDirectory);
         Directory.CreateDirectory(options.DownloadDirectory);
+        if (!string.IsNullOrEmpty(options.AuthResultPath))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(options.AuthResultPath) ?? options.LogDirectory);
+        }
         if (!string.IsNullOrEmpty(options.OutputPath))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(options.OutputPath) ?? options.LogDirectory);
@@ -52,6 +56,7 @@ internal sealed class BrowserForm : Form
     private CoreWebView2DownloadOperation _currentDownload;
     private TaskCompletionSource<bool> _downloadCompletionSource;
     private bool _isClosing;
+    private bool _authenticationResultWritten;
     private int _blockedLightweightResourceCount;
 
     public BrowserForm(HostOptions options)
@@ -112,6 +117,7 @@ internal sealed class BrowserForm : Form
         toolbar.Controls.Add(MakeButton("ログイン", 80, (_, _) => Navigate("https://accounts.booth.pm/users/sign_in")));
 
         _syncButton = MakeButton("同期", 70, async (_, _) => await SyncLibraryAsync());
+        _syncButton.Enabled = !_options.IsAuthenticationMode;
         _syncButton.ToolTipText("BOOTHライブラリページから商品候補を抽出してUnity用database.jsonへ保存します");
         toolbar.Controls.Add(_syncButton);
 
@@ -153,6 +159,7 @@ internal sealed class BrowserForm : Form
         root.Controls.Add(_statusLabel, 0, 2);
 
         Shown += async (_, _) => await InitializeAsync();
+        FormClosed += (_, _) => WriteCancelledAuthenticationResultIfNeeded();
     }
 
     private static Button MakeButton(string text, int width, EventHandler onClick)
@@ -186,6 +193,13 @@ internal sealed class BrowserForm : Form
             {
                 _statusLabel.Text = "読み込み中: " + e.Uri;
                 _addressBar.Text = e.Uri;
+
+                // 通常同期でログイン画面へ転送された場合は、見えないhelperを待機させない。
+                if (_options.SyncLibrary && IsBoothLoginUrl(e.Uri))
+                {
+                    _statusLabel.Text = "BOOTHにログインしていないため同期を終了します。";
+                    BeginInvoke(new MethodInvoker(SafeClose));
+                }
             };
             _webView.CoreWebView2.NavigationCompleted += async (_, e) =>
             {
@@ -193,7 +207,18 @@ internal sealed class BrowserForm : Form
                 _addressBar.Text = _webView.Source?.ToString() ?? string.Empty;
                 UpdateNavigationButtonState();
 
-                if (_options.SyncLibrary && e.IsSuccess)
+                if (_options.IsAuthenticationMode && !e.IsSuccess)
+                {
+                    WriteAuthenticationResult("error", "BOOTHページの読み込みに失敗しました: " + e.WebErrorStatus);
+                    BeginInvoke(new MethodInvoker(SafeClose));
+                    return;
+                }
+
+                if (_options.IsAuthenticationMode && e.IsSuccess)
+                {
+                    await HandleAuthenticationNavigationAsync();
+                }
+                else if (_options.SyncLibrary && e.IsSuccess)
                 {
                     await TryAutoSyncAfterNavigationAsync();
                 }
@@ -236,7 +261,7 @@ internal sealed class BrowserForm : Form
             {
                 Navigate(_options.DownloadUrl);
             }
-            else if (_options.SyncLibrary)
+            else if (_options.IsAuthenticationMode || _options.SyncLibrary)
             {
                 await NavigateLibraryPageAsync(_options.InitialUrl);
             }
@@ -248,11 +273,101 @@ internal sealed class BrowserForm : Form
         catch (Exception ex)
         {
             _statusLabel.Text = "初期化失敗: " + ex.Message;
+            if (_options.IsAuthenticationMode)
+            {
+                WriteAuthenticationResult("error", ex.Message);
+                BeginInvoke(new MethodInvoker(SafeClose));
+                return;
+            }
+
             MessageBox.Show(this,
                 "WebView2の初期化に失敗しました。\n\n" + ex,
                 "VRCQuickImporter",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+        }
+    }
+
+    private async Task HandleAuthenticationNavigationAsync()
+    {
+        if (_authenticationResultWritten || _isClosing)
+        {
+            return;
+        }
+
+        var url = _webView.Source?.ToString() ?? string.Empty;
+        if (IsBoothLibraryUrl(url))
+        {
+            _statusLabel.Text = "BOOTHライブラリへのアクセスを確認しました。";
+            WriteAuthenticationResult("authenticated", "BOOTHライブラリに到達しました。", url);
+            await Task.Delay(300);
+            BeginInvoke(new MethodInvoker(SafeClose));
+            return;
+        }
+
+        if (IsBoothLoginUrl(url))
+        {
+            if (_options.IsAuthenticationCheck)
+            {
+                _statusLabel.Text = "BOOTHへのログインが必要です。";
+                WriteAuthenticationResult("auth_required", "BOOTHへのログインが必要です。", url);
+                BeginInvoke(new MethodInvoker(SafeClose));
+            }
+            else
+            {
+                _statusLabel.Text = "BOOTHにログインしてください。完了後、ライブラリ画面への移動を確認します。";
+            }
+            return;
+        }
+
+        _statusLabel.Text = _options.IsAuthenticationCheck
+            ? "BOOTHの認証状態を確認中..."
+            : "BOOTHログイン完了後、ライブラリ画面を読み込み中...";
+    }
+
+    private void WriteCancelledAuthenticationResultIfNeeded()
+    {
+        if (_options.IsAuthenticationMode && !_authenticationResultWritten)
+        {
+            WriteAuthenticationResult("cancelled", "BOOTHログインが完了する前にWebViewを閉じました。");
+        }
+    }
+
+    private void WriteAuthenticationResult(string status, string message, string finalUrl = "")
+    {
+        if (!_options.IsAuthenticationMode || _authenticationResultWritten || string.IsNullOrWhiteSpace(_options.AuthResultPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(_options.AuthResultPath);
+            Directory.CreateDirectory(string.IsNullOrEmpty(directory) ? _options.LogDirectory : directory);
+            var temporaryPath = _options.AuthResultPath + ".tmp";
+            var backupPath = _options.AuthResultPath + ".bak";
+            var json = JsonSerializer.Serialize(new AuthenticationResult
+            {
+                Status = status,
+                FinalUrl = finalUrl,
+                Message = message,
+                UpdatedAt = DateTimeOffset.Now.ToString("o")
+            });
+            File.WriteAllText(temporaryPath, json);
+            if (File.Exists(_options.AuthResultPath))
+            {
+                File.Replace(temporaryPath, _options.AuthResultPath, backupPath, ignoreMetadataErrors: true);
+            }
+            else
+            {
+                File.Move(temporaryPath, _options.AuthResultPath);
+            }
+
+            _authenticationResultWritten = true;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine("認証結果の保存に失敗しました: " + ex.Message);
         }
     }
 
@@ -550,6 +665,14 @@ internal sealed class BrowserForm : Form
         catch { }
     }
 
+    private sealed class AuthenticationResult
+    {
+        public string Status { get; set; } = string.Empty;
+        public string FinalUrl { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public string UpdatedAt { get; set; } = string.Empty;
+    }
+
     private async Task SyncLibraryAsync()
     {
         await SyncSingleLibraryPageAsync();
@@ -557,7 +680,23 @@ internal sealed class BrowserForm : Form
 
     private static bool IsBoothLibraryUrl(string url)
     {
-        return url.IndexOf("accounts.booth.pm/library", StringComparison.OrdinalIgnoreCase) >= 0;
+        return TryGetBoothPath(url, "/library");
+    }
+
+    private static bool IsBoothLoginUrl(string url)
+    {
+        return TryGetBoothPath(url, "/users/sign_in");
+    }
+
+    private static bool TryGetBoothPath(string url, string expectedPath)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        return string.Equals(uri.Host, "accounts.booth.pm", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(uri.AbsolutePath.TrimEnd('/'), expectedPath, StringComparison.OrdinalIgnoreCase);
     }
 
     private void GoBack()
@@ -852,8 +991,12 @@ class HostOptions
     public string DownloadDirectory { get; private set; } = Path.Combine(Path.GetTempPath(), "VRCQuickImporter", "downloads");
     public string InitialUrl { get; private set; } = "https://accounts.booth.pm/users/sign_in";
     public string OutputPath { get; private set; } = string.Empty;
+    public string AuthResultPath { get; private set; } = string.Empty;
     public bool SyncLibrary { get; private set; }
     public bool ExitAfterSync { get; private set; }
+    public bool IsAuthenticationCheck { get; private set; }
+    public bool IsInteractiveAuthentication { get; private set; }
+    public bool IsAuthenticationMode => IsAuthenticationCheck || IsInteractiveAuthentication;
     public bool Headless { get; private set; }
     public int Page { get; private set; } = 1;
     public string DownloadUrl { get; private set; } = string.Empty;
@@ -875,6 +1018,12 @@ class HostOptions
             {
                 case "--sync-library":
                     options = options.WithSyncLibrary();
+                    break;
+                case "--check-auth":
+                    options = options.WithAuthenticationCheck();
+                    break;
+                case "--interactive-auth":
+                    options = options.WithInteractiveAuthentication();
                     break;
                 case "--exit-after-sync":
                     options = options.WithExitAfterSync();
@@ -908,6 +1057,7 @@ class HostOptions
                 case "--downloads":
                 case "--url":
                 case "--output":
+                case "--auth-result":
                 case "--rate-limit-file":
                     if (i + 1 >= args.Length) break;
                     var value = args[++i];
@@ -918,6 +1068,7 @@ class HostOptions
                         "--downloads" => options.WithDownloads(value),
                         "--url" => options.WithUrl(value),
                         "--output" => options.WithOutput(value),
+                        "--auth-result" => options.WithAuthResult(value),
                         "--rate-limit-file" => options.WithRateLimitFile(value),
                         _ => options
                     };
@@ -933,7 +1084,10 @@ class HostOptions
     private HostOptions WithDownloads(string value) => Copy(downloadDirectory: value);
     private HostOptions WithUrl(string value) => Copy(initialUrl: value);
     private HostOptions WithOutput(string value) => Copy(outputPath: value);
+    private HostOptions WithAuthResult(string value) => Copy(authResultPath: value);
     private HostOptions WithSyncLibrary() => Copy(syncLibrary: true);
+    private HostOptions WithAuthenticationCheck() => Copy(isAuthenticationCheck: true);
+    private HostOptions WithInteractiveAuthentication() => Copy(isInteractiveAuthentication: true);
     private HostOptions WithExitAfterSync() => Copy(exitAfterSync: true);
     private HostOptions WithHeadless() => Copy(headless: true);
     private HostOptions WithPage(int value) => Copy(page: value);
@@ -948,8 +1102,11 @@ class HostOptions
         string downloadDirectory = null,
         string initialUrl = null,
         string outputPath = null,
+        string authResultPath = null,
         bool? syncLibrary = null,
         bool? exitAfterSync = null,
+        bool? isAuthenticationCheck = null,
+        bool? isInteractiveAuthentication = null,
         bool? headless = null,
         int? page = null,
         string downloadUrl = null,
@@ -963,8 +1120,11 @@ class HostOptions
         DownloadDirectory = downloadDirectory ?? DownloadDirectory,
         InitialUrl = initialUrl ?? InitialUrl,
         OutputPath = outputPath ?? OutputPath,
+        AuthResultPath = authResultPath ?? AuthResultPath,
         SyncLibrary = syncLibrary ?? SyncLibrary,
         ExitAfterSync = exitAfterSync ?? ExitAfterSync,
+        IsAuthenticationCheck = isAuthenticationCheck ?? IsAuthenticationCheck,
+        IsInteractiveAuthentication = isInteractiveAuthentication ?? IsInteractiveAuthentication,
         Headless = headless ?? Headless,
         Page = page ?? Page,
         DownloadUrl = downloadUrl ?? DownloadUrl,

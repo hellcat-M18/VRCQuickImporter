@@ -44,6 +44,38 @@ namespace VRCQuickImporter.Editor.WebView
             });
         }
 
+        public static Process StartAuthenticationCheck(string resultPath)
+        {
+            return StartAuthentication(resultPath, true, "--check-auth");
+        }
+
+        public static Process StartInteractiveAuthentication(string resultPath)
+        {
+            return StartAuthentication(resultPath, false, "--interactive-auth");
+        }
+
+        private static Process StartAuthentication(string resultPath, bool headless, string modeArgument)
+        {
+            var args = new List<string>
+            {
+                Arg("--profile", VRCQuickImporterPaths.WebViewProfileDirectory),
+                Arg("--logs", VRCQuickImporterPaths.LogsDirectory),
+                Arg("--downloads", VRCQuickImporterPaths.DownloadsDirectory),
+                Arg("--url", "https://accounts.booth.pm/library"),
+                Arg("--auth-result", resultPath),
+                Arg("--rate-limit-file", VRCQuickImporterPaths.BoothLibraryAccessStampPath),
+                Arg("--min-access-interval-ms", "5000"),
+                modeArgument
+            };
+
+            if (headless)
+            {
+                args.Add("--headless");
+            }
+
+            return StartHost(args);
+        }
+
         public static Process StartLibrarySync(string outputPath, bool headless = true, int page = 1, bool skipRateLimit = false)
         {
             var url = page <= 1
