@@ -298,6 +298,9 @@ internal sealed class BrowserForm : Form
         var url = _webView.Source?.ToString() ?? string.Empty;
         if (IsBoothLibraryUrl(url))
         {
+            // ログイン後にライブラリへ到達した時点を最新のアクセスとして記録する。
+            // Unity側の初回同期はこの時刻から最低5秒待機して開始する。
+            await RecordLibraryAccessAsync();
             _statusLabel.Text = "BOOTHライブラリへのアクセスを確認しました。";
             WriteAuthenticationResult("authenticated", "BOOTHライブラリに到達しました。", url);
             await Task.Delay(300);
@@ -533,12 +536,29 @@ internal sealed class BrowserForm : Form
                 }
             }
 
+            await RecordLibraryAccessAsync();
+        }
+        catch
+        {
+            // レート制限ファイルの読み書きに失敗しても同期自体は続行する。
+        }
+    }
+
+    private async Task RecordLibraryAccessAsync()
+    {
+        if (_options.SkipRateLimit || _options.MinAccessIntervalMs <= 0 || string.IsNullOrWhiteSpace(_options.RateLimitFilePath))
+        {
+            return;
+        }
+
+        try
+        {
             Directory.CreateDirectory(Path.GetDirectoryName(_options.RateLimitFilePath) ?? _options.LogDirectory);
             await WriteAllTextAsync(_options.RateLimitFilePath, DateTimeOffset.UtcNow.ToString("o"));
         }
         catch
         {
-            // レート制限ファイルの読み書きに失敗しても同期自体は続行する。
+            // レート制限ファイルの記録に失敗しても認証結果の判定は続行する。
         }
     }
 
