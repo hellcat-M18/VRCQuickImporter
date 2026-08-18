@@ -259,16 +259,6 @@ namespace VRCQuickImporter.Editor.Library
                                              !string.IsNullOrWhiteSpace(file.DownloadUrl));
         }
 
-        private static string MakeSlotKey(BoothProduct product)
-        {
-            var fileIds = (product.Files ?? Enumerable.Empty<BoothDownloadFile>())
-                .Select(file => file?.FileId ?? string.Empty)
-                .Where(id => !string.IsNullOrEmpty(id))
-                .OrderBy(id => id)
-                .ToArray();
-            return product.ProductId + "::" + string.Join(",", fileIds);
-        }
-
         private static bool ContainsMatchingFile(IEnumerable<BoothDownloadFile> files, BoothDownloadFile target)
         {
             return (files ?? Enumerable.Empty<BoothDownloadFile>()).Any(file => file != null &&
