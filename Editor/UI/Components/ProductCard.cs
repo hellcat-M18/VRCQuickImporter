@@ -538,15 +538,16 @@ namespace VRCQuickImporter.Editor.UI
 
             if (onRefresh != null)
             {
-                var refreshButton = new Button(() =>
+                var refreshButton = new Button
+                {
+                    text = isRefreshing ? "取得中…" : "🔄 情報を再取得"
+                };
+                refreshButton.clicked += () =>
                 {
                     if (refreshButton.enabledSelf)
                     {
-                        onRefresh.Invoke(product);
+                        onRefresh?.Invoke(product);
                     }
-                })
-                {
-                    text = isRefreshing ? "取得中…" : "🔄 情報を再取得"
                 };
                 StyleSubButton(refreshButton);
                 refreshButton.tooltip = "この商品の情報をBOOTHから再取得します";
