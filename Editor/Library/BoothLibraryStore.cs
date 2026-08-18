@@ -172,6 +172,103 @@ namespace VRCQuickImporter.Editor.Library
             SaveDocument(document);
         }
 
+        /// <summary>
+        /// 同一ProductIdの既存スロット全てを、再取得した全スロットへ一括置換します。
+        /// 検証付き再取得でのみ呼び出され、バリエーションの欠落を防ぎます。
+        /// 再取得結果が不完全（DL情報なし）の場合は保存しません。
+        /// </summary>
+        public static bool ReplaceProductSlotsInPlace(string productId, IEnumerable<BoothProduct> refreshedProducts)
+        {
+            if (string.IsNullOrWhiteSpace(productId))
+            {
+                return false;
+            }
+
+            var refreshedList = (refreshedProducts ?? Enumerable.Empty<BoothProduct>())
+                .Where(product => product != null && product.ProductId == productId)
+                .ToList();
+            if (refreshedList.Count == 0)
+            {
+                return false;
+            }
+
+            // 再取得側に完全なDL情報を持たないスロットが含まれていたら保存しない。
+            var hasIncomplete = refreshedList.Any(product => !HasCompleteDownloadFiles(product));
+            if (hasIncomplete)
+            {
+                return false;
+            }
+
+            // 再取得側のスロットキー重複排除
+            var deduped = new List<BoothProduct>();
+            var seenKeys = new HashSet<string>();
+            foreach (var product in refreshedList)
+            {
+                if (seenKeys.Add(MakeSlotKey(product)))
+                {
+                    deduped.Add(product);
+                }
+            }
+
+            var document = LoadDatabaseDocument() ?? new BoothLibraryDocument();
+            var products = document.Products ?? (document.Products = new List<BoothProduct>());
+
+            // 既存DBから同ProductIdの連続スロット範囲を特定
+            var firstIndex = -1;
+            var lastIndex = -1;
+            for (var i = 0; i < products.Count; i++)
+            {
+                if (products[i] == null || products[i].ProductId != productId) continue;
+                if (firstIndex < 0) firstIndex = i;
+                lastIndex = i;
+            }
+
+            // 既存スロットが見つからない場合は末尾に追加
+            if (firstIndex < 0)
+            {
+                foreach (var product in deduped)
+                {
+                    products.Add(product);
+                }
+                SaveDocument(document);
+                return true;
+            }
+
+            // スロット数を比較し、変化がなければ保存しない
+            var existingCount = lastIndex - firstIndex + 1;
+            if (existingCount == deduped.Count &&
+                JsonUtility.ToJson(products[firstIndex]) == JsonUtility.ToJson(deduped[0]) &&
+                (deduped.Count == 1 ||
+                 JsonUtility.ToJson(products[firstIndex + 1]) == JsonUtility.ToJson(deduped[1])))
+            {
+                return false;
+            }
+
+            products.RemoveRange(firstIndex, existingCount);
+            products.InsertRange(firstIndex, deduped);
+            SaveDocument(document);
+            return true;
+        }
+
+        private static bool HasCompleteDownloadFiles(BoothProduct product)
+        {
+            if (product == null || product.Files == null || product.Files.Count == 0) return false;
+            return product.Files.All(file => file != null &&
+                                             !string.IsNullOrWhiteSpace(file.FileId) &&
+                                             !string.IsNullOrWhiteSpace(file.Name) &&
+                                             !string.IsNullOrWhiteSpace(file.DownloadUrl));
+        }
+
+        private static string MakeSlotKey(BoothProduct product)
+        {
+            var fileIds = (product.Files ?? Enumerable.Empty<BoothDownloadFile>())
+                .Select(file => file?.FileId ?? string.Empty)
+                .Where(id => !string.IsNullOrEmpty(id))
+                .OrderBy(id => id)
+                .ToArray();
+            return product.ProductId + "::" + string.Join(",", fileIds);
+        }
+
         private static bool ContainsMatchingFile(IEnumerable<BoothDownloadFile> files, BoothDownloadFile target)
         {
             return (files ?? Enumerable.Empty<BoothDownloadFile>()).Any(file => file != null &&

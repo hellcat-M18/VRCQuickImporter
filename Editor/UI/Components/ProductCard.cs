@@ -23,11 +23,17 @@ namespace VRCQuickImporter.Editor.UI
         /// <param name="onImport">メインアクション。選択中ファイルを渡す。</param>
         /// <param name="onOpenPage">商品ページを開くサブアクション。null なら表示しない。</param>
         /// <param name="onDoubleClick">カード本体のダブルクリック時のアクション。</param>
+        /// <param name="onRefresh">カード単位の再取得アクション。null なら表示しない。</param>
+        /// <param name="isRefreshing">このカードが現在再取得中かどうか。</param>
+        /// <param name="refreshEnabled">他カード含めて再取得を受け付け可能かどうか。</param>
         public static VisualElement Build(
             BoothProduct product,
             Action<BoothProduct, BoothDownloadFile> onImport,
             Action<BoothProduct> onOpenPage = null,
-            Action<BoothProduct> onDoubleClick = null)
+            Action<BoothProduct> onDoubleClick = null,
+            Action<BoothProduct> onRefresh = null,
+            bool isRefreshing = false,
+            bool refreshEnabled = true)
         {
             var card = VRCQuickImporterTheme.MakeShell(VRCQuickImporterTheme.RadiusCardOuter, VRCQuickImporterTheme.SpaceXs);
             card.name = "product-card-" + product.ProductId;
@@ -38,7 +44,7 @@ namespace VRCQuickImporter.Editor.UI
             card.Add(core);
 
             core.Add(BuildThumbnail(product));
-            core.Add(BuildBody(product, onImport, onOpenPage));
+            core.Add(BuildBody(product, onImport, onOpenPage, onRefresh, isRefreshing, refreshEnabled));
 
             // hover フィードバック: シェルのボーダーと内コア背景を強調
             var defaultCore = VRCQuickImporterTheme.CardCore;
@@ -308,7 +314,10 @@ namespace VRCQuickImporter.Editor.UI
         private static VisualElement BuildBody(
             BoothProduct product,
             Action<BoothProduct, BoothDownloadFile> onImport,
-            Action<BoothProduct> onOpenPage)
+            Action<BoothProduct> onOpenPage,
+            Action<BoothProduct> onRefresh,
+            bool isRefreshing,
+            bool refreshEnabled)
         {
             var body = new VisualElement();
 
@@ -349,7 +358,7 @@ namespace VRCQuickImporter.Editor.UI
                 body.Add(chipsRow);
             }
 
-            body.Add(BuildFileRow(product, onImport, onOpenPage));
+            body.Add(BuildFileRow(product, onImport, onOpenPage, onRefresh, isRefreshing, refreshEnabled));
             return body;
         }
 
@@ -460,7 +469,10 @@ namespace VRCQuickImporter.Editor.UI
         private static VisualElement BuildFileRow(
             BoothProduct product,
             Action<BoothProduct, BoothDownloadFile> onImport,
-            Action<BoothProduct> onOpenPage)
+            Action<BoothProduct> onOpenPage,
+            Action<BoothProduct> onRefresh,
+            bool isRefreshing,
+            bool refreshEnabled)
         {
             var row = new VisualElement();
             row.style.marginTop = VRCQuickImporterTheme.SpaceSm;
@@ -522,6 +534,26 @@ namespace VRCQuickImporter.Editor.UI
                 openPageButton.style.marginTop = VRCQuickImporterTheme.SpaceMd;
                 openPageButton.style.width = new Length(100, LengthUnit.Percent);
                 row.Add(openPageButton);
+            }
+
+            if (onRefresh != null)
+            {
+                var refreshButton = new Button(() =>
+                {
+                    if (refreshButton.enabledSelf)
+                    {
+                        onRefresh.Invoke(product);
+                    }
+                })
+                {
+                    text = isRefreshing ? "取得中…" : "🔄 情報を再取得"
+                };
+                StyleSubButton(refreshButton);
+                refreshButton.tooltip = "この商品の情報をBOOTHから再取得します";
+                refreshButton.style.marginTop = VRCQuickImporterTheme.SpaceMd;
+                refreshButton.style.width = new Length(100, LengthUnit.Percent);
+                refreshButton.SetEnabled(refreshEnabled && !isRefreshing);
+                row.Add(refreshButton);
             }
 
             return row;
