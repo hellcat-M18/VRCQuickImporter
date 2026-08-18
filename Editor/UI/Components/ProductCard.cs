@@ -540,7 +540,7 @@ namespace VRCQuickImporter.Editor.UI
             {
                 var refreshButton = new Button
                 {
-                    text = isRefreshing ? "取得中…" : "🔄 情報を再取得"
+                    text = isRefreshing ? "取得中…" : "情報を再取得"
                 };
                 refreshButton.clicked += () =>
                 {
