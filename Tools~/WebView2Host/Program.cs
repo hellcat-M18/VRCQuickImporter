@@ -265,6 +265,10 @@ internal sealed class BrowserForm : Form
             {
                 await NavigateLibraryPageAsync(_options.InitialUrl);
             }
+            else if (_options.IsProductOrderRefresh)
+            {
+                _ = RunProductOrderRefreshAsync();
+            }
             else
             {
                 Navigate(_options.InitialUrl);
@@ -628,6 +632,328 @@ internal sealed class BrowserForm : Form
 
         _isClosing = true;
         Close();
+    }
+
+    private async Task RunProductOrderRefreshAsync()
+    {
+        var targetId = _options.ProductRefreshId ?? string.Empty;
+        if (string.IsNullOrEmpty(targetId) || string.IsNullOrEmpty(_options.ProductRefreshOutputPath))
+        {
+            WriteProductRefreshError("invalid_arguments", "対象商品IDまたは出力パスが未指定です。");
+            BeginInvoke(new MethodInvoker(SafeClose));
+            return;
+        }
+
+        var orderUrls = LoadCachedOrderUrls(targetId);
+        if (orderUrls.Count == 0)
+        {
+            orderUrls = await ScanOrderUrlsForProductAsync(targetId);
+            if (orderUrls.Count == 0)
+            {
+                WriteProductRefreshError("product_not_found", "購入履歴に該当商品の注文が見つかりませんでした。");
+                BeginInvoke(new MethodInvoker(SafeClose));
+                return;
+            }
+            SaveOrderMap(targetId, orderUrls);
+        }
+
+        var aggregated = new List<BoothProductSlot>();
+        foreach (var orderUrl in orderUrls)
+        {
+            try { await WaitAndMarkLibraryAccessAsync(); } catch { }
+            _statusLabel.Text = "注文詳細を取得中: " + orderUrl;
+            Navigate(orderUrl);
+            if (!await WaitForNavigationAsync(30))
+            {
+                WriteProductRefreshError("navigation_failed", "注文詳細ページの読込に失敗: " + orderUrl);
+                BeginInvoke(new MethodInvoker(SafeClose));
+                return;
+            }
+
+            var rawJson = await _webView.CoreWebView2.ExecuteScriptAsync(BuildOrderDetailScript(targetId));
+            var parsed = ParseExtractionResult(rawJson);
+            if (parsed.error != null)
+            {
+                WriteProductRefreshError("parser_error", parsed.error);
+                BeginInvoke(new MethodInvoker(SafeClose));
+                return;
+            }
+            foreach (var slot in parsed.slots)
+            {
+                aggregated.Add(slot);
+            }
+        }
+
+        if (aggregated.Count == 0)
+        {
+            WriteProductRefreshError("no_slots", "注文詳細から対象商品のファイル情報を取得できませんでした。");
+            BeginInvoke(new MethodInvoker(SafeClose));
+            return;
+        }
+
+        var seenKeys = new HashSet<string>();
+        var unique = new List<BoothProductSlot>();
+        foreach (var slot in aggregated)
+        {
+            var key = MakeSlotKey(slot);
+            if (seenKeys.Add(key)) unique.Add(slot);
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_options.ProductRefreshOutputPath) ?? _options.LogDirectory);
+            var document = new BoothRefreshDocument
+            {
+                SchemaVersion = "1",
+                SyncedAt = DateTimeOffset.Now.ToString("o"),
+                SourceUrl = "orders",
+                Products = unique
+            };
+            var json = JsonSerializer.Serialize(document, new JsonSerializerOptions { WriteIndented = true });
+            var tmp = _options.ProductRefreshOutputPath + ".tmp";
+            File.WriteAllText(tmp, json);
+            File.Replace(tmp, _options.ProductRefreshOutputPath, _options.ProductRefreshOutputPath + ".bak", ignoreMetadataErrors: true);
+            _statusLabel.Text = $"商品情報を再取得しました（{unique.Sum(s => s.Files?.Count ?? 0)}ファイル）";
+        }
+        catch (Exception ex)
+        {
+            WriteProductRefreshError("write_failed", "注文詳細の保存に失敗しました: " + ex.Message);
+        }
+
+        BeginInvoke(new MethodInvoker(SafeClose));
+    }
+
+    private List<string> LoadCachedOrderUrls(string productId)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(_options.ProductRefreshOrderMapPath) || !File.Exists(_options.ProductRefreshOrderMapPath))
+            {
+                return new List<string>();
+            }
+            var json = File.ReadAllText(_options.ProductRefreshOrderMapPath);
+            var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("Entries", out var entries) || entries.ValueKind != JsonValueKind.Array)
+            {
+                return new List<string>();
+            }
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (!entry.TryGetProperty("ProductId", out var pidProp)) continue;
+                if (pidProp.GetString() != productId) continue;
+                if (!entry.TryGetProperty("OrderUrls", out var urls) || urls.ValueKind != JsonValueKind.Array) continue;
+                var list = new List<string>();
+                foreach (var url in urls.EnumerateArray())
+                {
+                    var s = url.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) list.Add(s);
+                }
+                return list;
+            }
+        }
+        catch
+        {
+            // ignore - treat as empty cache
+        }
+        return new List<string>();
+    }
+
+    private void SaveOrderMap(string productId, List<string> urls)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(_options.ProductRefreshOrderMapPath)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(_options.ProductRefreshOrderMapPath) ?? _options.LogDirectory);
+            var entries = new List<Dictionary<string, object>>();
+            if (File.Exists(_options.ProductRefreshOrderMapPath))
+            {
+                var existing = JsonDocument.Parse(File.ReadAllText(_options.ProductRefreshOrderMapPath));
+                if (existing.RootElement.TryGetProperty("Entries", out var arr) && arr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var entry in arr.EnumerateArray())
+                    {
+                        if (entry.TryGetProperty("ProductId", out var pid) && pid.GetString() == productId) continue;
+                        var dict = new Dictionary<string, object>();
+                        foreach (var p in entry.EnumerateObject())
+                        {
+                            dict[p.Name] = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() : (object)p.Value;
+                        }
+                        entries.Add(dict);
+                    }
+                }
+            }
+            entries.Add(new Dictionary<string, object>
+            {
+                { "ProductId", productId },
+                { "OrderUrls", urls }
+            });
+            var doc = new
+            {
+                SchemaVersion = "1",
+                UpdatedAt = DateTimeOffset.Now.ToString("o"),
+                Entries = entries
+            };
+            var tmp = _options.ProductRefreshOrderMapPath + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true }));
+            File.Replace(tmp, _options.ProductRefreshOrderMapPath, _options.ProductRefreshOrderMapPath + ".bak", ignoreMetadataErrors: true);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine("order-map 保存に失敗: " + ex.Message);
+        }
+    }
+
+    private async Task<List<string>> ScanOrderUrlsForProductAsync(string productId)
+    {
+        var result = new List<string>();
+        const int maxPages = 20;
+        for (var page = 1; page <= maxPages; page++)
+        {
+            try { await WaitAndMarkLibraryAccessAsync(); } catch { }
+            var pageUrl = page == 1 ? "https://accounts.booth.pm/orders" : $"https://accounts.booth.pm/orders?page={page}";
+            _statusLabel.Text = $"購入履歴を巡回中: ページ {page}";
+            Navigate(pageUrl);
+            if (!await WaitForNavigationAsync(30))
+            {
+                break;
+            }
+
+            var currentUrl = _webView.Source?.ToString() ?? string.Empty;
+            if (currentUrl.IndexOf("/orders", StringComparison.OrdinalIgnoreCase) < 0 ||
+                currentUrl.IndexOf("sign_in", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                break;
+            }
+
+            var rawJson = await _webView.CoreWebView2.ExecuteScriptAsync(OrdersListExtractionScript);
+            var doc = JsonDocument.Parse(rawJson);
+            if (!doc.RootElement.TryGetProperty("Orders", out var orders) || orders.ValueKind != JsonValueKind.Array)
+            {
+                break;
+            }
+            var pageHadAny = false;
+            foreach (var entry in orders.EnumerateArray())
+            {
+                if (!entry.TryGetProperty("ProductIds", out var productIds) || productIds.ValueKind != JsonValueKind.Array) continue;
+                foreach (var pid in productIds.EnumerateArray())
+                {
+                    if (pid.GetString() == productId)
+                    {
+                        if (entry.TryGetProperty("OrderUrl", out var orderUrl))
+                        {
+                            var u = orderUrl.GetString();
+                            if (!string.IsNullOrWhiteSpace(u) && !result.Contains(u)) result.Add(u);
+                        }
+                        pageHadAny = true;
+                    }
+                }
+            }
+            if (!pageHadAny && page > 1) break;
+        }
+        return result;
+    }
+
+    private async Task<bool> WaitForNavigationAsync(int timeoutSeconds)
+    {
+        var tcs = new TaskCompletionSource<bool>();
+        var completed = false;
+        void Handler(object sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            if (completed) return;
+            completed = true;
+            _webView.CoreWebView2.NavigationCompleted -= Handler;
+            tcs.TrySetResult(true);
+        }
+        if (_webView.CoreWebView2 != null)
+        {
+            _webView.CoreWebView2.NavigationCompleted += Handler;
+        }
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        using (cts.Token.Register(() => tcs.TrySetCanceled()))
+        {
+            try { await tcs.Task; return true; }
+            catch { return false; }
+        }
+    }
+
+    private string BuildOrderDetailScript(string productId)
+    {
+        var escaped = JsonSerializer.Serialize(productId);
+        return $"window.__VRCQI_REFRESH_PRODUCT_ID = {escaped}; {OrderDetailExtractionScript}";
+    }
+
+    private (string error, List<BoothProductSlot> slots) ParseExtractionResult(string rawJson)
+    {
+        try
+        {
+            var doc = JsonDocument.Parse(rawJson);
+            if (doc.RootElement.TryGetProperty("ParserError", out var err) && !string.IsNullOrEmpty(err.GetString()))
+            {
+                return (err.GetString(), new List<BoothProductSlot>());
+            }
+            var list = new List<BoothProductSlot>();
+            if (doc.RootElement.TryGetProperty("Products", out var products) && products.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var p in products.EnumerateArray())
+                {
+                    var slot = new BoothProductSlot();
+                    if (p.TryGetProperty("ProductId", out var pid)) slot.ProductId = pid.GetString() ?? string.Empty;
+                    if (p.TryGetProperty("Name", out var name)) slot.Name = name.GetString() ?? string.Empty;
+                    if (p.TryGetProperty("ProductUrl", out var pu)) slot.ProductUrl = pu.GetString() ?? string.Empty;
+                    if (p.TryGetProperty("ThumbnailUrl", out var tu)) slot.ThumbnailUrl = tu.GetString() ?? string.Empty;
+                    if (p.TryGetProperty("Files", out var files) && files.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var f in files.EnumerateArray())
+                        {
+                            var bf = new BoothDownloadFileInfo();
+                            if (f.TryGetProperty("FileId", out var fid)) bf.FileId = fid.GetString() ?? string.Empty;
+                            if (f.TryGetProperty("Name", out var fn)) bf.Name = fn.GetString() ?? string.Empty;
+                            if (f.TryGetProperty("SizeText", out var st)) bf.SizeText = st.GetString() ?? string.Empty;
+                            if (f.TryGetProperty("Kind", out var k) && k.ValueKind == JsonValueKind.Number) bf.Kind = k.GetInt32();
+                            if (f.TryGetProperty("DownloadUrl", out var du)) bf.DownloadUrl = du.GetString() ?? string.Empty;
+                            slot.Files.Add(bf);
+                        }
+                    }
+                    list.Add(slot);
+                }
+            }
+            return (null, list);
+        }
+        catch (Exception ex)
+        {
+            return ("抽出結果の解析に失敗: " + ex.Message, new List<BoothProductSlot>());
+        }
+    }
+
+    private static string MakeSlotKey(BoothProductSlot slot)
+    {
+        var ids = (slot.Files ?? new List<BoothDownloadFileInfo>())
+            .Select(file => file?.FileId ?? string.Empty)
+            .Where(id => !string.IsNullOrEmpty(id))
+            .OrderBy(id => id)
+            .ToArray();
+        return (slot.ProductId ?? string.Empty) + "::" + string.Join(",", ids);
+    }
+
+    private void WriteProductRefreshError(string code, string message)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(_options.ProductRefreshOutputPath)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(_options.ProductRefreshOutputPath) ?? _options.LogDirectory);
+            var tmp = _options.ProductRefreshOutputPath + ".tmp";
+            var json = JsonSerializer.Serialize(new
+            {
+                SchemaVersion = "1",
+                SyncedAt = DateTimeOffset.Now.ToString("o"),
+                SourceUrl = "orders",
+                ParserError = code + ": " + message,
+                Products = Array.Empty<object>()
+            });
+            File.WriteAllText(tmp, json);
+            File.Replace(tmp, _options.ProductRefreshOutputPath, _options.ProductRefreshOutputPath + ".bak", ignoreMetadataErrors: true);
+        }
+        catch { }
     }
 
     private void OnDownloadStateChanged(object sender, object e)
@@ -1002,6 +1328,189 @@ internal sealed class BrowserForm : Form
   };
 })()
 ";
+
+    private const string OrdersListExtractionScript = @"
+(() => {
+  const itemLinkSelector = 'a[href*=""/items/""]';
+  const orderLinkSelector = 'a[href*=""/orders/""]';
+  const absoluteUrl = value => {
+    try { return value ? new URL(value, location.href).href : ''; } catch { return ''; }
+  };
+  const itemIdFromUrl = href => {
+    const match = (href || '').match(/\/items\/(\d+)/);
+    return match ? match[1] : '';
+  };
+  const orderIdFromUrl = href => {
+    const match = (href || '').match(/\/orders\/(\d+)/);
+    return match ? match[1] : '';
+  };
+
+  const findOrderBlock = orderAnchor => {
+    let el = orderAnchor.parentElement;
+    while (el && el !== document.body) {
+      if (el.querySelector(orderLinkSelector) && el.querySelector(itemLinkSelector)) {
+        return el;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  };
+
+  const processed = new Set();
+  const orders = [];
+  const orderAnchors = Array.from(document.querySelectorAll(orderLinkSelector));
+  for (const orderAnchor of orderAnchors) {
+    const orderUrl = absoluteUrl(orderAnchor.getAttribute('href'));
+    const orderId = orderIdFromUrl(orderUrl);
+    if (!orderId || processed.has(orderId)) continue;
+    const block = findOrderBlock(orderAnchor);
+    if (!block) continue;
+    const productIds = Array.from(block.querySelectorAll(itemLinkSelector))
+      .map(anchor => itemIdFromUrl(absoluteUrl(anchor.getAttribute('href'))))
+      .filter(Boolean);
+    const dedup = Array.from(new Set(productIds));
+    orders.push({ OrderId: orderId, OrderUrl: orderUrl, ProductIds: dedup });
+    processed.add(orderId);
+  }
+  return {
+    SchemaVersion: '1',
+    ParserVersion: '1',
+    ParserError: '',
+    SyncedAt: new Date().toLocaleString(),
+    SourceUrl: location.href,
+    Orders: orders
+  };
+})()
+";
+
+    private const string OrderDetailExtractionScript = @"
+(() => {
+  const downloadSelector = '.js-download-button[data-test=""downloadable""][data-href]';
+  const downloadControlSelector = '[data-test=""downloadable""],[data-test=""other-downloads-button""]';
+  const itemLinkSelector = 'a[href*=""/items/""]';
+  const absoluteUrl = value => {
+    try { return value ? new URL(value, location.href).href : ''; } catch { return ''; }
+  };
+  const itemIdFromUrl = href => {
+    const match = (href || '').match(/\/items\/(\d+)/);
+    return match ? match[1] : '';
+  };
+  const kindFromName = name => {
+    const lower = (name || '').toLowerCase();
+    if (lower.endsWith('.unitypackage')) return 1;
+    if (lower.endsWith('.zip')) return 2;
+    if (/\.(png|jpg|jpeg|webp|gif)$/.test(lower)) return 3;
+    return 0;
+  };
+  const elementText = element => normalize(element && (element.innerText || element.textContent));
+  const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+  const productIdsWithin = element => new Set(Array.from(element.querySelectorAll(itemLinkSelector))
+    .map(anchor => itemIdFromUrl(absoluteUrl(anchor.getAttribute('href'))))
+    .filter(Boolean));
+
+  const targetProductId = (window.__VRCQI_REFRESH_PRODUCT_ID || '').toString();
+  if (!targetProductId) {
+    return { SchemaVersion: '1', ParserVersion: '1', ParserError: '対象商品IDが指定されていません。', SyncedAt: new Date().toLocaleString(), SourceUrl: location.href, Products: [] };
+  }
+
+  const itemAnchors = Array.from(document.querySelectorAll(itemLinkSelector))
+    .filter(anchor => itemIdFromUrl(absoluteUrl(anchor.getAttribute('href'))) === targetProductId);
+  const processedBlocks = new Set();
+  const slots = [];
+  const errors = [];
+  for (const sourceAnchor of itemAnchors) {
+    let element = sourceAnchor.parentElement;
+    let block = null;
+    while (element && element !== document.body) {
+      if (element.querySelector(downloadSelector)) {
+        const productIds = productIdsWithin(element);
+        if (productIds.size === 1 && productIds.has(targetProductId)) {
+          block = element;
+          break;
+        }
+      }
+      element = element.parentElement;
+    }
+    if (!block || processedBlocks.has(block)) continue;
+    processedBlocks.add(block);
+
+    const anchors = Array.from(block.querySelectorAll(itemLinkSelector))
+      .filter(anchor => itemIdFromUrl(absoluteUrl(anchor.getAttribute('href'))) === targetProductId);
+    const anchor = anchors.find(item => elementText(item).length > 0) || anchors[0] || sourceAnchor;
+    const href = absoluteUrl(anchor.getAttribute('href'));
+    const name = elementText(anchor);
+    if (!name) continue;
+
+    const image = Array.from(block.querySelectorAll('img'))
+      .find(img => {
+        const a = img.closest(itemLinkSelector);
+        if (!a) return false;
+        return itemIdFromUrl(absoluteUrl(a.getAttribute('href'))) === targetProductId;
+      }) || block.querySelector('img');
+
+    const files = [];
+    const seenUrls = new Set();
+    const expectedUrls = new Set();
+    for (const button of Array.from(block.querySelectorAll(downloadSelector))) {
+      const downloadUrl = absoluteUrl(button.getAttribute('data-href'));
+      if (!downloadUrl) continue;
+      expectedUrls.add(downloadUrl);
+      if (seenUrls.has(downloadUrl)) continue;
+      let fileName = '';
+      let branch = button;
+      while (branch.parentElement && branch.parentElement !== block) {
+        const parent = branch.parentElement;
+        const candidate = Array.from(parent.children).find(child =>
+          child !== branch &&
+          !child.matches(downloadControlSelector) &&
+          !child.querySelector(downloadControlSelector) &&
+          elementText(child)
+        );
+        if (candidate) { fileName = elementText(candidate); break; }
+        branch = parent;
+      }
+      if (!fileName) continue;
+      const downloadId = (downloadUrl.match(/\/downloadables\/(\d+)/) || ['', ''])[1];
+      files.push({
+        FileId: downloadId || (targetProductId + ':file:' + files.length),
+        Name: fileName,
+        SizeText: '',
+        Kind: kindFromName(fileName),
+        DownloadUrl: downloadUrl
+      });
+      seenUrls.add(downloadUrl);
+    }
+
+    if (files.length !== expectedUrls.size) {
+      errors.push(`注文 ${location.pathname} の対象商品 ${targetProductId} でファイル名抽出が不完全です（ボタン ${expectedUrls.size} 件、ファイル ${files.length} 件）。`);
+      continue;
+    }
+
+    slots.push({
+      ProductId: targetProductId,
+      Name: name,
+      ShopName: '',
+      ThumbnailUrl: absoluteUrl(image && (image.currentSrc || image.src || image.getAttribute('src'))),
+      ProductUrl: href,
+      Files: files,
+      CategoryLabel: '',
+      BadgeText: '',
+      PriceText: '',
+      LikeCount: 0
+    });
+  }
+
+  const parserError = errors.length > 0 ? errors.join('\n') : '';
+  return {
+    SchemaVersion: '1',
+    ParserVersion: '1',
+    ParserError: parserError,
+    SyncedAt: new Date().toLocaleString(),
+    SourceUrl: location.href,
+    Products: slots
+  };
+})()
+";
 }
 
 class HostOptions
@@ -1024,6 +1533,10 @@ class HostOptions
     public string RateLimitFilePath { get; private set; } = string.Empty;
     public int MinAccessIntervalMs { get; private set; }
     public bool SkipRateLimit { get; private set; }
+    public bool IsProductOrderRefresh { get; private set; }
+    public string ProductRefreshId { get; private set; } = string.Empty;
+    public string ProductRefreshOrderMapPath { get; private set; } = string.Empty;
+    public string ProductRefreshOutputPath { get; private set; } = string.Empty;
 
     public static HostOptions Parse(string[] args)
     {
@@ -1072,6 +1585,24 @@ class HostOptions
                 case "--skip-rate-limit":
                     options = options.WithSkipRateLimit();
                     break;
+                case "--product-refresh":
+                    if (i + 1 < args.Length)
+                    {
+                        options = options.WithProductRefreshId(args[++i]);
+                    }
+                    break;
+                case "--order-map":
+                    if (i + 1 < args.Length)
+                    {
+                        options = options.WithProductRefreshOrderMap(args[++i]);
+                    }
+                    break;
+                case "--product-output":
+                    if (i + 1 < args.Length)
+                    {
+                        options = options.WithProductRefreshOutput(args[++i]);
+                    }
+                    break;
                 case "--profile":
                 case "--logs":
                 case "--downloads":
@@ -1115,6 +1646,9 @@ class HostOptions
     private HostOptions WithRateLimitFile(string value) => Copy(rateLimitFilePath: value);
     private HostOptions WithMinAccessIntervalMs(int value) => Copy(minAccessIntervalMs: value);
     private HostOptions WithSkipRateLimit() => Copy(skipRateLimit: true);
+    private HostOptions WithProductRefreshId(string value) => Copy(productRefreshId: value, isProductOrderRefresh: true);
+    private HostOptions WithProductRefreshOrderMap(string value) => Copy(productRefreshOrderMapPath: value);
+    private HostOptions WithProductRefreshOutput(string value) => Copy(productRefreshOutputPath: value);
 
     private HostOptions Copy(
         string profileDirectory = null,
@@ -1133,7 +1667,11 @@ class HostOptions
         bool? isDownloadMode = null,
         string rateLimitFilePath = null,
         int? minAccessIntervalMs = null,
-        bool? skipRateLimit = null) => new()
+        bool? skipRateLimit = null,
+        bool? isProductOrderRefresh = null,
+        string productRefreshId = null,
+        string productRefreshOrderMapPath = null,
+        string productRefreshOutputPath = null) => new()
     {
         ProfileDirectory = profileDirectory ?? ProfileDirectory,
         LogDirectory = logDirectory ?? LogDirectory,
@@ -1151,7 +1689,11 @@ class HostOptions
         IsDownloadMode = isDownloadMode ?? IsDownloadMode,
         RateLimitFilePath = rateLimitFilePath ?? RateLimitFilePath,
         MinAccessIntervalMs = minAccessIntervalMs ?? MinAccessIntervalMs,
-        SkipRateLimit = skipRateLimit ?? SkipRateLimit
+        SkipRateLimit = skipRateLimit ?? SkipRateLimit,
+        IsProductOrderRefresh = isProductOrderRefresh ?? IsProductOrderRefresh,
+        ProductRefreshId = productRefreshId ?? ProductRefreshId,
+        ProductRefreshOrderMapPath = productRefreshOrderMapPath ?? ProductRefreshOrderMapPath,
+        ProductRefreshOutputPath = productRefreshOutputPath ?? ProductRefreshOutputPath
     };
 }
 
@@ -1163,5 +1705,32 @@ internal static class WinFormsExtensions
     {
         ToolTip.SetToolTip(control, text);
     }
+}
+
+internal sealed class BoothProductSlot
+{
+    public string ProductId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string ProductUrl { get; set; } = string.Empty;
+    public string ThumbnailUrl { get; set; } = string.Empty;
+    public List<BoothDownloadFileInfo> Files { get; set; } = new List<BoothDownloadFileInfo>();
+}
+
+internal sealed class BoothDownloadFileInfo
+{
+    public string FileId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string SizeText { get; set; } = string.Empty;
+    public int Kind { get; set; }
+    public string DownloadUrl { get; set; } = string.Empty;
+}
+
+internal sealed class BoothRefreshDocument
+{
+    public string SchemaVersion { get; set; } = "1";
+    public string SyncedAt { get; set; } = string.Empty;
+    public string SourceUrl { get; set; } = string.Empty;
+    public string ParserError { get; set; } = string.Empty;
+    public List<BoothProductSlot> Products { get; set; } = new List<BoothProductSlot>();
 }
 }

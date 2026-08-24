@@ -25,6 +25,7 @@ namespace VRCQuickImporter.Editor.Library
         public string SchemaVersion = "1";
         public string SyncedAt = string.Empty;
         public string SourceUrl = string.Empty;
+        public string ParserError = string.Empty;
         public List<BoothProduct> Products = new List<BoothProduct>();
 
         /// <summary>ローカルJSONキャッシュが取得済みの最大ページ番号。</summary>

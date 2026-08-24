@@ -109,6 +109,31 @@ namespace VRCQuickImporter.Editor.WebView
             return StartHost(args);
         }
 
+        public static Process StartProductOrderRefresh(string productId, bool headless = true)
+        {
+            VRCQuickImporterPaths.EnsureDirectories();
+
+            var args = new List<string>
+            {
+                Arg("--profile", VRCQuickImporterPaths.WebViewProfileDirectory),
+                Arg("--logs", VRCQuickImporterPaths.LogsDirectory),
+                Arg("--downloads", VRCQuickImporterPaths.DownloadsDirectory),
+                Arg("--product-refresh", productId),
+                Arg("--order-map", VRCQuickImporterPaths.OrderMapPath),
+                Arg("--product-output", VRCQuickImporterPaths.OrderRefreshOutputPath),
+                Arg("--rate-limit-file", VRCQuickImporterPaths.BoothLibraryAccessStampPath),
+                Arg("--min-access-interval-ms", "5000"),
+                "--exit-after-sync"
+            };
+
+            if (headless)
+            {
+                args.Add("--headless");
+            }
+
+            return StartHost(args);
+        }
+
         public static Process StartDownload(string downloadUrl, string outputPath, bool headless = true)
         {
             var args = new List<string>
