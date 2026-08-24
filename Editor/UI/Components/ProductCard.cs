@@ -490,9 +490,10 @@ namespace VRCQuickImporter.Editor.UI
             }
 
             var choices = new List<string>(files.Count);
-            foreach (var file in files)
+            for (var i = 0; i < files.Count; i++)
             {
-                choices.Add(BoothTextUtil.TruncateForCard(file.DisplayName, 34));
+                // ponytail: 連番+中間省略でPopupの同一ラベル統合を回避。末尾拡張子/バージョン残し。
+                choices.Add(FormatFileChoiceLabel(files[i], i + 1));
             }
 
             var popup = new PopupField<string>(choices, 0);
@@ -582,6 +583,60 @@ namespace VRCQuickImporter.Editor.UI
             {
                 button.style.backgroundColor = VRCQuickImporterTheme.Accent;
             });
+        }
+
+        /// <summary>
+        /// PopupFieldchoicesの表示ラベルを生成する。
+        /// UnityのPopupは同一ラベルをメニューで1項目に統合するため、
+        /// 1始まりの連番を必ず付与し、同一表示名でも区別できるようにする。
+        /// ファイル名が長い場合は末尾（拡張子やバージョン）を残す中間省略にする。
+        /// </summary>
+        private static string FormatFileChoiceLabel(BoothDownloadFile file, int oneBasedIndex)
+        {
+            const int maxWidth = 36;
+            var portion = BoothTextUtil.SanitizeDisplayText(BoothTextUtil.NormalizeOptionalLabel(file?.DisplayName));
+            if (string.IsNullOrEmpty(portion))
+            {
+                portion = "(ファイル名なし)";
+            }
+
+            var prefix = oneBasedIndex + ". ";
+            var available = Math.Max(8, maxWidth - prefix.Length);
+            portion = MiddleKeepTail(portion, available);
+            return prefix + portion;
+        }
+
+        // 先頭と末尾（拡張子優先）を残す中間省略。
+        // 末尾が拡張子ならそのまま残し、そうでなければそのまま末尾数文字を残す。
+        private static string MiddleKeepTail(string value, int maxWidth)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            if (value.Length <= maxWidth) return value;
+
+            // 末尾の拡張子（.zip / .unitypackage / .psd など）は必ず残す。
+            var dotIndex = value.LastIndexOf('.');
+            string ext = string.Empty;
+            string stem = value;
+            if (dotIndex > 0 && value.Length - dotIndex <= 8)
+            {
+                ext = value.Substring(dotIndex);
+                stem = value.Substring(0, dotIndex);
+            }
+
+            // 拡張子含めての長さが既に予算内なら省略しない。
+            if (value.Length <= maxWidth) return value;
+
+            // 拡張子の分を差し引いた本体に使える幅。先頭と末尾をほぼ同じ長さで残す。
+            var bodyBudget = Math.Max(2, maxWidth - ext.Length - 1); // -1 for "…"
+            if (stem.Length <= bodyBudget) return stem + ext;
+
+            var headLen = Math.Max(1, bodyBudget / 2);
+            var tailLen = Math.Max(1, bodyBudget - headLen);
+            if (stem.Length <= headLen + tailLen)
+            {
+                return stem + ext;
+            }
+            return stem.Substring(0, headLen) + "…" + stem.Substring(stem.Length - tailLen, tailLen) + ext;
         }
 
         private static void StyleSubButton(Button button)
