@@ -22,8 +22,6 @@ namespace VRCQuickImporter.Editor.Storage
         public static string PendingPagePath => Path.Combine(DataRoot, "pending-page.json");
         public static string BoothLibraryAccessStampPath => Path.Combine(CacheDirectory, "booth-library-last-access.txt");
         public static string AuthenticationResultPath => Path.Combine(CacheDirectory, "auth-result.json");
-        public static string OrderMapPath => Path.Combine(DataRoot, "order-map.json");
-        public static string OrderRefreshOutputPath => Path.Combine(CacheDirectory, "product-order-refresh.json");
 
         public static void EnsureDirectories()
         {
@@ -34,9 +32,6 @@ namespace VRCQuickImporter.Editor.Storage
             Directory.CreateDirectory(ExtractedDirectory);
             Directory.CreateDirectory(WebViewProfileDirectory);
             Directory.CreateDirectory(LogsDirectory);
-            Directory.CreateDirectory(CacheDirectory);
-            Directory.CreateDirectory(Path.GetDirectoryName(OrderMapPath) ?? DataRoot);
-            Directory.CreateDirectory(Path.GetDirectoryName(OrderRefreshOutputPath) ?? DataRoot);
         }
 
         public static string GetPackageRoot()

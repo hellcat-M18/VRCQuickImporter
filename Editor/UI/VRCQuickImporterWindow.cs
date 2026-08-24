@@ -25,7 +25,8 @@ namespace VRCQuickImporter.Editor.UI
 
     internal enum ProductVerificationMode
     {
-        Download
+        Download,
+        Refresh
     }
 
     public sealed class VRCQuickImporterWindow : EditorWindow
@@ -67,12 +68,8 @@ namespace VRCQuickImporter.Editor.UI
         private DateTime _productVerificationPageStartedAtUtc;
         private bool _productVerificationInProgress;
         private ProductVerificationMode _productVerificationMode;
-
+        private readonly List<BoothProduct> _refreshCollectedSlots = new List<BoothProduct>();
         private VisualElement _updateBanner;
-        private Process _orderRefreshProcess;
-        private string _orderRefreshProductId;
-        private DateTime _orderRefreshStartedAtUtc;
-        private bool _orderRefreshInProgress;
         private static bool _updateCheckDone;
         private static string _availableUpdateVersion;
 
@@ -81,7 +78,6 @@ namespace VRCQuickImporter.Editor.UI
         internal event System.Action<BoothProduct, BoothDownloadFile> OnImportRequested;
 
         private const float BackgroundSyncTimeoutSeconds = 120f;
-        private const float OrderRefreshTimeoutSeconds = 300f;
         private const float AuthenticationTimeoutSeconds = 120f;
         private const float ProductVerificationTimeoutSeconds = 120f;
         private const double BoothLibraryAccessIntervalSeconds = 5.0;
@@ -718,7 +714,8 @@ namespace VRCQuickImporter.Editor.UI
                 CategoryLabel = source.CategoryLabel,
                 BadgeText = source.BadgeText,
                 PriceText = source.PriceText,
-                LikeCount = source.LikeCount
+                LikeCount = source.LikeCount,
+                SourcePage = source.SourcePage
             };
         }
 
@@ -941,7 +938,7 @@ namespace VRCQuickImporter.Editor.UI
                         OpenProductPage,
                         OnProductCardDoubleClick,
                         OnProductCardRefreshRequested,
-                        isRefreshing: _orderRefreshInProgress && string.Equals(_orderRefreshProductId, state.Products[index].ProductId, StringComparison.Ordinal),
+                        isRefreshing: _productVerificationInProgress && _productBeingVerified != null && _productBeingVerified.ProductId == state.Products[index].ProductId,
                         refreshEnabled: CanStartProductVerification());
                     ProductCard.ApplyCardWidth(card, layout.CardWidth);
                     card.style.marginRight = column == layout.ColumnCount - 1 ? 0 : CardSpacing;
@@ -1921,212 +1918,17 @@ namespace VRCQuickImporter.Editor.UI
 
         private void VerifyAndUpdateProductBeforeDownload(BoothProduct product, BoothDownloadFile file)
         {
-            BeginProductVerification(product, file);
+            BeginProductVerification(product, file, ProductVerificationMode.Download);
         }
 
         private void OnProductCardRefreshRequested(BoothProduct product)
         {
-            if (product == null || string.IsNullOrEmpty(product.ProductId))
-            {
-                return;
-            }
-            if (_orderRefreshInProgress)
-            {
-                EditorUtility.DisplayDialog(
-                    "VRCQuickImporter",
-                    "他の商品情報を再取得中です。完了後に再度お試しください。",
-                    "OK");
-                return;
-            }
-            if (_librarySyncInProgress || _fullRefreshInProgress ||
-                _productVerificationInProgress || _authenticationInProgress ||
-                WebView2HostLauncher.IsRunning)
-            {
-                EditorUtility.DisplayDialog(
-                    "VRCQuickImporter",
-                    "別のBOOTHアクセスが進行中です。完了後に再度お試しください。",
-                    "OK");
-                return;
-            }
-
-            var cached = BoothOrderMapStore.GetOrderUrls(product.ProductId);
-            if (cached.Count == 0)
-            {
-                var proceed = EditorUtility.DisplayDialog(
-                    "VRCQuickImporter",
-                    "この商品は購入履歴から注文情報を探すため、購入履歴ページを巡回します。数ページのアクセスが発生する可能性があります。続行しますか？",
-                    "続行", "キャンセル");
-                if (!proceed) return;
-            }
-
-            BeginProductOrderRefresh(product.ProductId);
-        }
-
-        private void BeginProductOrderRefresh(string productId)
-        {
-            VRCQuickImporterPaths.EnsureDirectories();
-            try
-            {
-                if (File.Exists(VRCQuickImporterPaths.OrderRefreshOutputPath))
-                {
-                    File.Delete(VRCQuickImporterPaths.OrderRefreshOutputPath);
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[VRCQuickImporter] 注文リフレッシュ出力の削除に失敗: " + ex.Message);
-            }
-
-            _orderRefreshProductId = productId;
-            _orderRefreshStartedAtUtc = DateTime.UtcNow;
-            _orderRefreshInProgress = true;
-            _orderRefreshProcess = WebView2HostLauncher.StartProductOrderRefresh(productId, headless: true);
-            if (_orderRefreshProcess == null)
-            {
-                _orderRefreshInProgress = false;
-                EditorUtility.DisplayDialog(
-                    "VRCQuickImporter",
-                    "商品情報の再取得を開始できませんでした。",
-                    "OK");
-                return;
-            }
-
-            EditorApplication.update -= PollOrderRefresh;
-            EditorApplication.update += PollOrderRefresh;
-            RefreshWindow();
-        }
-
-        private void PollOrderRefresh()
-        {
-            if (!_orderRefreshInProgress)
-            {
-                EditorApplication.update -= PollOrderRefresh;
-                return;
-            }
-
-            var elapsed = (DateTime.UtcNow - _orderRefreshStartedAtUtc).TotalSeconds;
-            if (elapsed > OrderRefreshTimeoutSeconds)
-            {
-                try { if (_orderRefreshProcess != null && !_orderRefreshProcess.HasExited) _orderRefreshProcess.Kill(); } catch { }
-                FinishOrderRefresh();
-                EditorUtility.DisplayDialog(
-                    "VRCQuickImporter",
-                    "商品情報の再取得がタイムアウトしました。",
-                    "OK");
-                return;
-            }
-
-            try
-            {
-                if (_orderRefreshProcess != null && _orderRefreshProcess.HasExited && _orderRefreshProcess.ExitCode != 0)
-                {
-                    FinishOrderRefresh();
-                    EditorUtility.DisplayDialog(
-                        "VRCQuickImporter",
-                        "商品情報の再取得に失敗しました（helperエラー）。",
-                        "OK");
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[VRCQuickImporter] 注文リフレッシュ監視に失敗: " + ex.Message);
-            }
-
-            if (!File.Exists(VRCQuickImporterPaths.OrderRefreshOutputPath))
+            if (!CanStartProductVerification())
             {
                 return;
             }
 
-            try
-            {
-                if (File.GetLastWriteTimeUtc(VRCQuickImporterPaths.OrderRefreshOutputPath) < _orderRefreshStartedAtUtc.AddSeconds(-1))
-                {
-                    return;
-                }
-            }
-            catch { }
-
-            try
-            {
-                if (_orderRefreshProcess != null && !_orderRefreshProcess.HasExited)
-                {
-                    return;
-                }
-            }
-            catch { }
-
-            var json = File.ReadAllText(VRCQuickImporterPaths.OrderRefreshOutputPath);
-            FinishOrderRefresh();
-
-            if (TryConsumeOrderRefreshResult(json, out var fileCount, out var error))
-            {
-                RefreshWindow();
-                EditorUtility.DisplayDialog(
-                    "VRCQuickImporter",
-                    $"商品情報を再取得しました（{fileCount}ファイル）。",
-                    "OK");
-            }
-            else
-            {
-                EditorUtility.DisplayDialog(
-                    "VRCQuickImporter",
-                    $"商品情報を再取得できませんでした。\n\n{error}",
-                    "OK");
-                RefreshWindow();
-            }
-        }
-
-        private bool TryConsumeOrderRefreshResult(string json, out int fileCount, out string error)
-        {
-            fileCount = 0;
-            error = string.Empty;
-            try
-            {
-                var doc = JsonUtility.FromJson<BoothLibraryDocument>(json);
-                if (doc == null)
-                {
-                    error = "レスポンスを解釈できませんでした。";
-                    return false;
-                }
-                if (!string.IsNullOrEmpty(doc.ParserError))
-                {
-                    error = doc.ParserError;
-                    return false;
-                }
-                var slots = (doc.Products ?? new List<BoothProduct>())
-                    .Where(item => item != null && item.ProductId == _orderRefreshProductId)
-                    .ToList();
-                if (slots.Count == 0)
-                {
-                    error = "対象商品に該当するデータが見つかりませんでした。";
-                    return false;
-                }
-                fileCount = slots.Sum(s => s.Files?.Count ?? 0);
-                return BoothLibraryStore.ReplaceProductSlotsInPlace(_orderRefreshProductId, slots);
-            }
-            catch (Exception ex)
-            {
-                error = "結果の読み込みに失敗: " + ex.Message;
-                return false;
-            }
-        }
-
-        private void FinishOrderRefresh()
-        {
-            EditorApplication.update -= PollOrderRefresh;
-            EditorUtility.ClearProgressBar();
-            _orderRefreshInProgress = false;
-            _orderRefreshProcess = null;
-            _orderRefreshProductId = null;
-            try
-            {
-                if (File.Exists(VRCQuickImporterPaths.OrderRefreshOutputPath))
-                {
-                    File.Delete(VRCQuickImporterPaths.OrderRefreshOutputPath);
-                }
-            }
-            catch { }
+            BeginProductVerification(product, null, ProductVerificationMode.Refresh);
         }
 
         private bool CanStartProductVerification()
@@ -2134,39 +1936,58 @@ namespace VRCQuickImporter.Editor.UI
             if (_productVerificationInProgress) return false;
             if (_librarySyncInProgress) return false;
             if (_fullRefreshInProgress) return false;
-            if (_orderRefreshInProgress) return false;
-            if (_authenticationInProgress) return false;
             if (WebView2HostLauncher.IsRunning) return false;
             if (_productVerificationProcess != null && !_productVerificationProcess.HasExited) return false;
-            if (_orderRefreshProcess != null && !_orderRefreshProcess.HasExited) return false;
             return true;
         }
 
-        private void BeginProductVerification(BoothProduct product, BoothDownloadFile file)
+        private void BeginProductVerification(BoothProduct product, BoothDownloadFile file, ProductVerificationMode mode)
         {
             var document = BoothLibraryStore.LoadDatabaseDocument();
             var productIndex = document?.Products?.FindIndex(item => item != null && item.ProductId == product.ProductId) ?? -1;
             if (productIndex < 0)
             {
+                if (mode == ProductVerificationMode.Refresh)
+                {
+                    EditorUtility.DisplayDialog(
+                        "VRCQuickImporter",
+                        "再取得対象の商品がデータベースに見つかりません。",
+                        "OK");
+                    return;
+                }
                 ShowProductVerificationGuidance();
                 return;
             }
 
             _productBeingVerified = product;
             _fileBeingVerified = file;
-            _productVerificationMode = ProductVerificationMode.Download;
+            _productVerificationMode = mode;
             _productVerificationPages.Clear();
-            AddVerificationPage(productIndex / BoothLibraryPageSize + 1);
-            AddVerificationPage(productIndex / BoothLibraryPageSize + 2);
-            AddVerificationPage(productIndex / BoothLibraryPageSize);
+            if (mode == ProductVerificationMode.Refresh)
+            {
+                // Refresh: 掲載ページ1枚だけを再取得して対象ProductIdのみを置換する。
+                var refreshPage = ResolveRefreshPage(document, product, productIndex);
+                AddVerificationPage(refreshPage);
+            }
+            else
+            {
+                AddVerificationPage(productIndex / BoothLibraryPageSize + 1);
+                AddVerificationPage(productIndex / BoothLibraryPageSize + 2);
+                AddVerificationPage(productIndex / BoothLibraryPageSize);
+            }
             _productVerificationPageIndex = 0;
             _productVerificationInProgress = true;
             _productVerificationOutputPath = Path.Combine(
                 VRCQuickImporterPaths.CacheDirectory,
-                "download-verification-page.json");
+                mode == ProductVerificationMode.Refresh ? "refresh-verification-page.json" : "download-verification-page.json");
 
             EditorApplication.update -= PollProductVerification;
             EditorApplication.update += PollProductVerification;
+
+            if (mode == ProductVerificationMode.Refresh)
+            {
+                RefreshWindow();
+            }
 
             LaunchProductVerificationPage();
         }
@@ -2177,6 +1998,32 @@ namespace VRCQuickImporter.Editor.UI
             {
                 _productVerificationPages.Add(page);
             }
+        }
+
+        private static int ResolveRefreshPage(BoothLibraryDocument document, BoothProduct product, int fallbackIndex)
+        {
+            // 1) DBに保存されているSourcePage（ヘルパー出力）で対象ページを特定する。
+            var dbPage = -1;
+            if (document?.Products != null)
+            {
+                foreach (var existing in document.Products)
+                {
+                    if (existing == null || existing.ProductId != product.ProductId) continue;
+                    if (existing.SourcePage <= 0) continue;
+                    if (dbPage < 0 || existing.SourcePage < dbPage)
+                    {
+                        dbPage = existing.SourcePage;
+                    }
+                }
+            }
+            if (dbPage >= 1) return dbPage;
+
+            // 2) 表示中カードのSourcePage（LibraryExtractionScriptで埋められたもの）。
+            if (product != null && product.SourcePage >= 1) return product.SourcePage;
+
+            // 3) 旧DBなどSourcePage不明時はIndexから推定する。
+            if (fallbackIndex >= 0) return fallbackIndex / BoothLibraryPageSize + 1;
+            return 1;
         }
 
         private void LaunchProductVerificationPage()
@@ -2239,6 +2086,21 @@ namespace VRCQuickImporter.Editor.UI
                 var matchingProducts = (document.Products ?? new List<BoothProduct>())
                     .Where(item => item != null && item.ProductId == _productBeingVerified.ProductId)
                     .ToList();
+
+                if (_productVerificationMode == ProductVerificationMode.Refresh)
+                {
+                    _refreshCollectedSlots.AddRange(matchingProducts);
+                    _productVerificationPageIndex++;
+                    if (_productVerificationPageIndex >= _productVerificationPages.Count)
+                    {
+                        FinishRefreshVerification();
+                    }
+                    else
+                    {
+                        LaunchProductVerificationPage();
+                    }
+                    return;
+                }
 
                 var updatedProduct = matchingProducts.FirstOrDefault(item =>
                     FindUpdatedDownloadFile(_fileBeingVerified, item.Files) != null) ?? matchingProducts.FirstOrDefault();
@@ -2396,6 +2258,68 @@ namespace VRCQuickImporter.Editor.UI
             BoothImportPipeline.StartImport(updatedProduct, updatedFile);
         }
 
+        private void FinishRefreshVerification()
+        {
+            var collected = _refreshCollectedSlots
+                .Where(product => product != null && !string.IsNullOrEmpty(product.ProductId))
+                .ToList();
+
+            // Refreshは掲載ページ1枚だけを対象にする。複数ページの結果が混入していたら安全のため保存しない。
+            int? refreshPage = _productVerificationPages.Count == 1 ? _productVerificationPages[0] : (int?)null;
+            var targetProductId = _productBeingVerified != null ? _productBeingVerified.ProductId : null;
+
+            FinishProductVerification();
+
+            if (string.IsNullOrEmpty(targetProductId))
+            {
+                ShowProductRefreshGuidance("再取得対象の商品情報が失われました。");
+                RefreshWindow();
+                return;
+            }
+
+            var pageScoped = refreshPage.HasValue
+                ? collected.Where(product => product.SourcePage == refreshPage.Value).ToList()
+                : new List<BoothProduct>();
+
+            if (pageScoped.Count == 0 || pageScoped.Any(product => !HasCompleteDownloadData(product)))
+            {
+                ShowProductRefreshGuidance("再取得したページに対象商品が見つからないか、DL情報が不完全です。");
+                RefreshWindow();
+                return;
+            }
+
+            var replaced = BoothLibraryStore.ReplaceProductSlotsForSourcePageInPlace(
+                targetProductId,
+                refreshPage.Value,
+                pageScoped);
+
+            var fileCount = pageScoped.Sum(p => p.Files?.Count ?? 0);
+            if (replaced)
+            {
+                RefreshWindow();
+                EditorUtility.DisplayDialog(
+                    "VRCQuickImporter",
+                    $"商品情報を再取得しました（{fileCount}ファイル）。",
+                    "OK");
+            }
+            else
+            {
+                RefreshWindow();
+                EditorUtility.DisplayDialog(
+                    "VRCQuickImporter",
+                    $"商品情報は最新です（{fileCount}ファイル）。",
+                    "OK");
+            }
+        }
+
+        private static void ShowProductRefreshGuidance(string detail)
+        {
+            EditorUtility.DisplayDialog(
+                "VRCQuickImporter",
+                $"商品情報を再取得できませんでした。\n\n{detail}\n\nライブラリの同期で改善する場合があります。",
+                "OK");
+        }
+
         private static bool HasCompleteDownloadData(BoothProduct product)
         {
             return product != null &&
@@ -2457,6 +2381,7 @@ namespace VRCQuickImporter.Editor.UI
             _productVerificationPages.Clear();
             _productVerificationPageIndex = 0;
             _productVerificationMode = ProductVerificationMode.Download;
+            _refreshCollectedSlots.Clear();
 
             try
             {
@@ -2564,15 +2489,6 @@ namespace VRCQuickImporter.Editor.UI
         {
             HideImportPathOverlays();
             AbortProductVerification();
-            try
-            {
-                if (_orderRefreshProcess != null && !_orderRefreshProcess.HasExited)
-                {
-                    _orderRefreshProcess.Kill();
-                }
-            }
-            catch { }
-            EditorApplication.update -= PollOrderRefresh;
             EditorApplication.update -= PollAuthentication;
             _authenticationInProgress = false;
             _waitingForInteractiveAuthentication = false;

@@ -25,7 +25,6 @@ namespace VRCQuickImporter.Editor.Library
         public string SchemaVersion = "1";
         public string SyncedAt = string.Empty;
         public string SourceUrl = string.Empty;
-        public string ParserError = string.Empty;
         public List<BoothProduct> Products = new List<BoothProduct>();
 
         /// <summary>ローカルJSONキャッシュが取得済みの最大ページ番号。</summary>
@@ -90,5 +89,11 @@ namespace VRCQuickImporter.Editor.Library
 
         /// <summary>いいね数。</summary>
         public int LikeCount;
+
+        /// <summary>
+        /// このスロットを抽出したBOOTHライブラリのページ番号。
+        /// 未取得（既存データ）は0。Refreshはこの値を見て掲載ページ1枚だけを再取得する。
+        /// </summary>
+        public int SourcePage;
     }
 }

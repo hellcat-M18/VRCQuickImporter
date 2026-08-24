@@ -213,18 +213,16 @@ namespace VRCQuickImporter.Editor.Library
             var document = LoadDatabaseDocument() ?? new BoothLibraryDocument();
             var products = document.Products ?? (document.Products = new List<BoothProduct>());
 
-            // 既存DBから同ProductIdの連続スロット範囲を特定
-            var firstIndex = -1;
-            var lastIndex = -1;
+            // 既存DBから同ProductIdの全スロット位置を収集（連続前提を捨てて非連続も安全に対応）。
+            var existingIndexes = new List<int>();
             for (var i = 0; i < products.Count; i++)
             {
                 if (products[i] == null || products[i].ProductId != productId) continue;
-                if (firstIndex < 0) firstIndex = i;
-                lastIndex = i;
+                existingIndexes.Add(i);
             }
 
             // 既存スロットが見つからない場合は末尾に追加
-            if (firstIndex < 0)
+            if (existingIndexes.Count == 0)
             {
                 foreach (var product in deduped)
                 {
@@ -234,18 +232,118 @@ namespace VRCQuickImporter.Editor.Library
                 return true;
             }
 
-            // スロット数を比較し、変化がなければ保存しない
-            var existingCount = lastIndex - firstIndex + 1;
-            if (existingCount == deduped.Count &&
-                JsonUtility.ToJson(products[firstIndex]) == JsonUtility.ToJson(deduped[0]) &&
-                (deduped.Count == 1 ||
-                 JsonUtility.ToJson(products[firstIndex + 1]) == JsonUtility.ToJson(deduped[1])))
+            // 既存スロットのJSONをまとめて比較し、全件同一なら保存しない。
+            var existingJson = existingIndexes.Select(i => JsonUtility.ToJson(products[i])).ToList();
+            var dedupedJson = deduped.Select(JsonUtility.ToJson).ToList();
+            if (SlotSequencesEqual(existingJson, dedupedJson))
             {
                 return false;
             }
 
-            products.RemoveRange(firstIndex, existingCount);
-            products.InsertRange(firstIndex, deduped);
+            // 対象インデックスを降順で削除し、先頭位置へ挿入することで他商品を巻き込まない。
+            var insertIndex = existingIndexes[0];
+            for (var i = existingIndexes.Count - 1; i >= 0; i--)
+            {
+                products.RemoveAt(existingIndexes[i]);
+            }
+            products.InsertRange(insertIndex, deduped);
+            SaveDocument(document);
+            return true;
+        }
+
+        private static bool SlotSequencesEqual(List<string> a, List<string> b)
+        {
+            if (a == null || b == null || a.Count != b.Count) return false;
+            for (var i = 0; i < a.Count; i++)
+            {
+                if (a[i] != b[i]) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// 指定したProductId×SourcePageのスロットだけを再取得結果で置換します。
+        /// 別ページに置かれている同ProductIdスロットは保持し、途中の他商品も削除しません。
+        /// SourcePage&lt;=0 の場合は旧DBと同じく全ProductIdスロット置換にフォールバックします。
+        /// </summary>
+        public static bool ReplaceProductSlotsForSourcePageInPlace(string productId, int sourcePage, IEnumerable<BoothProduct> refreshedProducts)
+        {
+            if (sourcePage <= 0)
+            {
+                return ReplaceProductSlotsInPlace(productId, refreshedProducts);
+            }
+
+            if (string.IsNullOrWhiteSpace(productId))
+            {
+                return false;
+            }
+
+            var refreshedList = (refreshedProducts ?? Enumerable.Empty<BoothProduct>())
+                .Where(product => product != null && product.ProductId == productId)
+                .ToList();
+            if (refreshedList.Count == 0)
+            {
+                return false;
+            }
+
+            if (refreshedList.Any(product => !HasCompleteDownloadFiles(product)))
+            {
+                return false;
+            }
+
+            var deduped = new List<BoothProduct>();
+            var seenKeys = new HashSet<string>();
+            foreach (var product in refreshedList)
+            {
+                if (seenKeys.Add(MakeSlotKey(product)))
+                {
+                    deduped.Add(product);
+                }
+            }
+
+            var document = LoadDatabaseDocument() ?? new BoothLibraryDocument();
+            var products = document.Products ?? (document.Products = new List<BoothProduct>());
+
+            // 同一SourcePageかつProductIdが一致するスロット位置だけを集める。
+            var targetIndexes = new List<int>();
+            for (var i = 0; i < products.Count; i++)
+            {
+                var existing = products[i];
+                if (existing == null) continue;
+                if (existing.ProductId != productId) continue;
+                if (existing.SourcePage != sourcePage) continue;
+                targetIndexes.Add(i);
+            }
+
+            // 既存に同ページスロットが無い場合は先頭位置を推定（先頭ページ=先頭）から追加する。
+            if (targetIndexes.Count == 0)
+            {
+                int insertIndex = products.Count;
+                for (var i = 0; i < products.Count; i++)
+                {
+                    if (products[i] == null || products[i].ProductId != productId) continue;
+                    insertIndex = i;
+                    break;
+                }
+                products.InsertRange(insertIndex, deduped);
+                SaveDocument(document);
+                return true;
+            }
+
+            // 全スロット同一なら保存しない。
+            var existingJson = targetIndexes.Select(i => JsonUtility.ToJson(products[i])).ToList();
+            var dedupedJson = deduped.Select(JsonUtility.ToJson).ToList();
+            if (SlotSequencesEqual(existingJson, dedupedJson))
+            {
+                return false;
+            }
+
+            var insertAt = targetIndexes[0];
+            for (var i = targetIndexes.Count - 1; i >= 0; i--)
+            {
+                products.RemoveAt(targetIndexes[i]);
+            }
+            products.InsertRange(insertAt, deduped);
             SaveDocument(document);
             return true;
         }
